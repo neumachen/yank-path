@@ -1,0 +1,36 @@
+[package]
+name = "yank-path"
+version = "0.1.0"
+edition = "2021"
+description = "Render and yank (copy) path strings in chosen anchor form (home/base/parent/git/absolute/relative-to)."
+license = "MIT OR Apache-2.0"
+authors = ["neumachen"]
+repository = "https://github.com/neumachen/yank-path"
+readme = "README.md"
+keywords = ["cli", "path", "clipboard", "yank", "copy"]
+categories = ["command-line-utilities"]
+
+[lib]
+name = "yank_path"
+path = "src/lib.rs"
+
+[[bin]]
+name = "yank-path"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+arboard = "3"
+glob = "0.3"
+
+[dev-dependencies]
+assert_cmd = "2"
+predicates = "3"
+tempfile = "3"
+
+[profile.release]
+strip = true
+lto = true
+opt-level = "z"
+codegen-units = 1
+panic = "abort"
