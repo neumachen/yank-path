@@ -88,7 +88,9 @@ mod tests {
             git_root: None,
             fs: &fs,
         };
-        let err = GitRenderer.render(Path::new("src/lib.rs"), &ctx).unwrap_err();
+        let err = GitRenderer
+            .render(Path::new("src/lib.rs"), &ctx)
+            .unwrap_err();
         assert!(matches!(err, YankError::NotInRepo));
     }
 

@@ -66,7 +66,11 @@ impl fmt::Display for YankError {
                 "glob may not contain '/': {p}; single-level patterns only"
             ),
             YankError::GlobNoMatch(patterns) => {
-                write!(f, "no files matched glob pattern(s): {}", patterns.join(", "))
+                write!(
+                    f,
+                    "no files matched glob pattern(s): {}",
+                    patterns.join(", ")
+                )
             }
             YankError::ConflictingAnchors => write!(
                 f,
