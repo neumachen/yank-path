@@ -18,7 +18,9 @@ pub mod resolve;
 pub use anchor::{Anchor, AnchorRenderer, RenderContext};
 // pub use app::App; // not yet implemented (Phase 8)
 // pub use cli::Cli; // not yet implemented (Phase 8)
-pub use clipboard::{ArboardClipboard, BufferSink, Clipboard, FakeClipboard, OutputSink, StdoutSink};
+pub use clipboard::{
+    ArboardClipboard, BufferSink, Clipboard, FakeClipboard, OutputSink, StdoutSink,
+};
 pub use error::YankError;
 pub use fs::{FileSystem, OsFileSystem};
 pub use gitroot::{GitRootDetector, WalkUpGitRootDetector};

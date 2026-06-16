@@ -200,11 +200,13 @@ pub(crate) mod test_support {
             self
         }
 
+        #[allow(dead_code)]
         pub(crate) fn with_existing_file(self, path: impl Into<PathBuf>) -> Self {
             self.existing.borrow_mut().insert(path.into());
             self
         }
 
+        #[allow(dead_code)]
         pub(crate) fn with_existing_dir(self, path: impl Into<PathBuf>) -> Self {
             let p: PathBuf = path.into();
             self.existing.borrow_mut().insert(p.clone());

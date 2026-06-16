@@ -75,9 +75,7 @@ mod tests {
                 git_root: None,
                 fs: &fs,
             };
-            let got = AbsoluteRenderer
-                .render(Path::new(c.target), &ctx)
-                .unwrap();
+            let got = AbsoluteRenderer.render(Path::new(c.target), &ctx).unwrap();
             assert_eq!(got, c.expected, "case `{}`", c.name);
         }
     }
