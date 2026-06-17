@@ -16,8 +16,8 @@ pub mod glob;
 pub mod resolve;
 
 pub use anchor::{Anchor, AnchorRenderer, RenderContext};
-// pub use app::App; // not yet implemented (Phase 8)
-// pub use cli::Cli; // not yet implemented (Phase 8)
+pub use app::App;
+pub use cli::Cli;
 pub use clipboard::{
     ArboardClipboard, BufferSink, Clipboard, FakeClipboard, OutputSink, StdoutSink,
 };
