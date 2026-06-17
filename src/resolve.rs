@@ -33,9 +33,10 @@ pub fn resolve_operands(
         if !fs.exists(&abs) {
             return Err(YankError::NotFound(operand.clone()));
         }
-        let final_path = fs
-            .canonicalize(&abs)
-            .unwrap_or_else(|_| normalize_components(&abs));
+        let final_path = match fs.canonicalize(&abs) {
+            Ok(canon) => normalize_components(&canon),
+            Err(_) => normalize_components(&abs),
+        };
         resolved.push(final_path);
     }
 
