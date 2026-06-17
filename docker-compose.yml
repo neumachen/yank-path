@@ -1,0 +1,31 @@
+# Docker-based dev workflow for yank-path.
+#
+# The `dev` service builds the `builder` stage of the Dockerfile (which has
+# the full Rust toolchain) and mounts the working tree into /app so that
+# cargo commands run against live sources. A named volume backs the cargo
+# registry/target directories to keep incremental builds fast across runs.
+#
+# Usage:
+#   docker compose run --rm dev               # runs `cargo test` by default
+#   docker compose run --rm dev cargo clippy  # ad-hoc cargo command
+#   docker compose run --rm dev bash          # interactive shell
+
+services:
+  dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: builder
+    image: yank-path-dev:latest
+    working_dir: /app
+    volumes:
+      - .:/app
+      - cargo-registry:/usr/local/cargo/registry
+      - cargo-git:/usr/local/cargo/git
+      - target-cache:/app/target
+    command: ["cargo", "test"]
+
+volumes:
+  cargo-registry:
+  cargo-git:
+  target-cache:

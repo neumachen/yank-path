@@ -1,0 +1,9 @@
+target/
+.git/
+.aider-desk/
+*.md
+!README.md
+Dockerfile
+docker-compose.yml
+Makefile
+.env*
