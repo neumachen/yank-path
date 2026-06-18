@@ -1,5 +1,10 @@
 # yank-path
 
+[![CI](https://github.com/neumachen/yank-path/actions/workflows/ci.yml/badge.svg)](https://github.com/neumachen/yank-path/actions/workflows/ci.yml)
+[![Docker](https://github.com/neumachen/yank-path/actions/workflows/docker.yml/badge.svg)](https://github.com/neumachen/yank-path/actions/workflows/docker.yml)
+[![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
+[![Crates.io](https://img.shields.io/crates/v/yank-path.svg)](https://crates.io/crates/yank-path)
+
 `yank-path` is a small, composable Rust CLI for rendering the **textual
 representation** of one or more filesystem paths under a chosen anchor
 form and copying the result to the system clipboard. It exists because
@@ -18,6 +23,57 @@ yank-path [OPTIONS] [PATH...]
 - With no operand, `yank-path` defaults to `.` (the current directory).
 - Multiple operands are rendered **one per line**, in the order given.
 - All options apply to **every** operand in the invocation.
+
+## Installation
+
+### From crates.io (recommended)
+
+```sh
+cargo install yank-path
+```
+
+### From source (latest `main`)
+
+Install the latest unreleased revision directly from GitHub:
+
+```sh
+cargo install --git https://github.com/neumachen/yank-path
+```
+
+Or clone and build manually:
+
+```sh
+git clone https://github.com/neumachen/yank-path
+cd yank-path
+cargo build --release
+# binary at target/release/yank-path
+```
+
+### Runtime notes
+
+The binary is self-contained — once built, it has no runtime
+dependencies beyond a system clipboard backend, and even that is
+optional. On **headless systems** with no X11 or Wayland display (CI
+runners, SSH sessions, the Docker image shipped with this repo)
+`yank-path` automatically falls back to printing the rendered text to
+stdout instead of copying it to the clipboard, so the command remains
+useful everywhere.
+
+If you would rather not install a toolchain locally, the provided
+Docker image works as a drop-in alternative — see
+[Container usage](#container-usage) for the full workflow:
+
+```sh
+docker build -t yank-path .
+docker run --rm yank-path .
+```
+
+### Requirements
+
+Building or installing from source requires a stable Rust toolchain
+(`cargo` 1.70 or newer is known to work; any reasonably current stable
+release should be fine). No other system packages are required on
+Linux, macOS, or Windows.
 
 ## Anchor modes
 
