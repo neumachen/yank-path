@@ -1,0 +1,186 @@
+# yank-path
+
+`yank-path` is a small, composable Rust CLI for rendering the **textual
+representation** of one or more filesystem paths under a chosen anchor
+form and copying the result to the system clipboard. It exists because
+developers most often need the path *string* — to paste into chat
+messages, issues, pull requests, docs, configuration files, log lines —
+not the file itself. `yank-path` makes producing that string a single,
+predictable command instead of an ad-hoc mixture of `pwd`, `realpath`,
+`basename`, `dirname`, and shell variable substitutions.
+
+## Synopsis
+
+```
+yank-path [OPTIONS] [PATH...]
+```
+
+- With no operand, `yank-path` defaults to `.` (the current directory).
+- Multiple operands are rendered **one per line**, in the order given.
+- All options apply to **every** operand in the invocation.
+
+## Anchor modes
+
+The anchor controls *which form* of the path string is produced.
+`--from`, `--absolute`, and `--relative-to` are **mutually exclusive**;
+supplying more than one is a usage error.
+
+Examples below assume the current working directory is
+`~/projects/example-repo` (i.e. `/Users/example/projects/example-repo`)
+and the command is `yank-path .`.
+
+| Anchor          | Aliases  | Flag                     | Output                                                                |
+| --------------- | -------- | ------------------------ | --------------------------------------------------------------------- |
+| home (default)  | —        | `--from home`            | `~/projects/example-repo` (falls back to absolute if outside `$HOME`) |
+| base            | basename | `--from base`            | `example-repo`                                                        |
+| parent          | dirname  | `--from parent`          | `projects/example-repo`                                               |
+| git             | —        | `--from git`             | `.` (relative to repo root; errors if not in a repo)                  |
+| absolute        | —        | `--absolute`             | `/Users/example/projects/example-repo`                                |
+| relative-to     | —        | `--relative-to <PATH>`   | e.g. `--relative-to ~/projects` → `example-repo`                      |
+
+Notes:
+
+- **No anchor ever emits a bare filename.** Every rendered output
+  contains at least one containing-directory segment, so the result is
+  unambiguous when pasted into prose.
+- **Git detection walks up the filesystem** looking for a `.git` entry.
+  No `git` subprocess is invoked. `--from git` exits non-zero when no
+  ancestor `.git` is found.
+- **`home` falls back to absolute** when the target is outside `$HOME`,
+  rather than producing a confusing `~/../...` form.
+
+## Glob expansion
+
+`--glob PATTERN` expands a single-level glob in the current working
+directory. The flag is **repeatable** and the results are concatenated.
+
+Rules:
+
+- **Single-level only.** A pattern may not contain `/`; multi-segment
+  patterns are rejected.
+- **`**` is rejected** with a dedicated error. Recursive globbing is
+  explicitly out of scope for v1.
+- **Files only.** Directories that happen to match the pattern are
+  silently skipped.
+- **Sorted deterministically.** Aggregate results are sorted
+  lexicographically across all patterns so output is stable across
+  runs.
+- **No deduplication.** If two patterns both match the same file, that
+  file is rendered twice.
+- **Evaluated relative to the current working directory.**
+- **No-match is fatal.** If the union of all `--glob` patterns matches
+  zero files, `yank-path` exits non-zero and **does not modify the
+  clipboard**.
+
+Bare shell-expanded globs (e.g. `yank-path *.md`) still work — those
+become ordinary positional operands and are processed by the strict
+validation path described below, not the `--glob` machinery.
+
+## Clipboard and output
+
+- **Default:** rendered text is copied to the system clipboard via
+  [`arboard`](https://docs.rs/arboard). Nothing is written to stdout.
+- **`--print`:** also write the rendered text to stdout. The clipboard
+  is still updated unless `--no-copy` is set.
+- **`--no-copy`:** suppress the clipboard write entirely. Combined with
+  `--print` this becomes a pure stdout renderer. Used alone it is a
+  silent success (useful as a validation step in scripts).
+- **Headless fallback:** on hosts where no clipboard backend is
+  available (e.g. a Linux container with no X/Wayland session),
+  `yank-path` automatically writes the rendered text to stdout instead
+  of failing. Combining the fallback with `--print` does not
+  double-emit.
+
+## Strict validation
+
+Validation is **all-or-nothing**. Every positional operand must exist
+on disk; if any operand fails verification, `yank-path`:
+
+1. exits with a non-zero status,
+2. prints the offending path to stderr, and
+3. **does not modify the clipboard**.
+
+This means a successful `yank-path` invocation always corresponds to a
+clipboard that contains the full, valid result — there is no partial
+state to reason about.
+
+## Examples
+
+```sh
+# Default: yank `~/projects/example-repo` (home-anchored) for the cwd.
+yank-path
+
+# Repo-relative path for a source file (errors if not in a Git repo).
+yank-path --from git src/main.rs
+
+# Canonical absolute path of a file.
+yank-path --absolute README.md
+
+# Print all *.rs files in the cwd to stdout without touching the clipboard.
+yank-path --glob '*.rs' --print --no-copy
+
+# Render a path relative to an explicit base directory.
+yank-path --relative-to ~ ~/projects/example-repo/README.md
+# → projects/example-repo/README.md
+```
+
+## Container usage
+
+`yank-path` ships with a multi-stage `Dockerfile`, a `docker-compose.yml`
+for development, and a `Makefile` that wraps the common workflows.
+
+Makefile targets:
+
+| Target          | Action                                                 |
+| --------------- | ------------------------------------------------------ |
+| `build`         | `cargo build --release`                                |
+| `test`          | `cargo test`                                           |
+| `lint`          | `cargo clippy --all-targets -- -D warnings`            |
+| `fmt`           | `cargo fmt`                                            |
+| `fmt-check`     | `cargo fmt --check`                                    |
+| `docker-build`  | `docker build -t yank-path:latest .`                   |
+| `docker-test`   | `docker compose run --rm dev cargo test`               |
+| `clean`         | `cargo clean`                                          |
+
+The `dev` compose service builds the Dockerfile's `builder` stage
+(which carries the full Rust toolchain), mounts the working tree at
+`/app`, and caches `cargo` registry, git, and `target/` directories in
+named volumes for fast incremental rebuilds.
+
+```sh
+docker compose run --rm dev               # runs `cargo test`
+docker compose run --rm dev cargo clippy  # any cargo command
+docker compose run --rm dev bash          # interactive shell
+```
+
+Inside a container there is **no clipboard backend**, so any
+`yank-path` invocation automatically exercises the stdout-fallback
+path described above. This is a useful smoke test for CI as well:
+
+```sh
+docker run --rm yank-path:latest --absolute /data
+# /data
+```
+
+## Deferred (out of scope for v1)
+
+The following are intentionally **not** implemented. They are listed
+here so future contributors and users know what to expect, and to make
+clear that the current surface is minimal by design.
+
+- `--permissive` mode (partial-success semantics).
+- Deduplication / `--unique` flag.
+- `--stdin` input (reading operands from standard input).
+- Fuzzy path matching.
+- Regular-expression matching.
+- Recursive globbing — `**` is **rejected** with a dedicated error,
+  not silently treated as a wildcard.
+- NUL-separated I/O (`-0` style separators).
+- Configuration files or environment-variable defaults.
+- Shell completions.
+- Man pages.
+- OS-level packaging (Homebrew, deb/rpm, etc.).
+
+## License
+
+Dual-licensed under MIT or Apache-2.0, at your option.
