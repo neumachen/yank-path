@@ -1,6 +1,9 @@
 [tools]
 rust = "stable"
 
+# Native linker (faster dev builds; referenced by RUSTFLAGS below)
+mold = "latest"
+
 # Cargo extensions (installed via cargo-binstall or cargo install)
 "cargo:cargo-audit" = "latest"
 "cargo:cargo-deny" = "latest"
