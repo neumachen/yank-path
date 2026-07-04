@@ -2,16 +2,17 @@
 //!
 //! All business logic lives in the library crate. This file is intentionally
 //! tiny: it parses CLI args, constructs the real collaborator implementations
-//! (OS filesystem, walk-up Git detector, arboard clipboard, stdout sink),
-//! hands them to [`App`], and maps any [`YankError`] to a distinct exit
-//! code defined by [`YankError::exit_code`].
+//! (OS filesystem, walk-up Git detector, VCS info provider, arboard clipboard,
+//! stdout sink), hands them to [`App`], and maps any [`YankError`] to a
+//! distinct exit code defined by [`YankError::exit_code`].
 
 use std::process::ExitCode;
 
 use clap::Parser;
 
 use yank_path::{
-    App, ArboardClipboard, Cli, OsFileSystem, StdoutSink, WalkUpGitRootDetector, YankError,
+    App, ArboardClipboard, Cli, GitDirVcsInfoProvider, OsFileSystem, StdoutSink,
+    WalkUpGitRootDetector, YankError,
 };
 
 fn main() -> ExitCode {
@@ -19,10 +20,11 @@ fn main() -> ExitCode {
 
     let fs = OsFileSystem::new();
     let git_detector = WalkUpGitRootDetector::new();
+    let vcs_provider = GitDirVcsInfoProvider::new();
     let mut clipboard = ArboardClipboard::new();
     let mut sink = StdoutSink;
 
-    let mut app = App::new(&fs, &git_detector, &mut clipboard, &mut sink);
+    let mut app = App::new(&fs, &git_detector, &vcs_provider, &mut clipboard, &mut sink);
 
     match app.run(&cli) {
         Ok(code) => ExitCode::from(code as u8),

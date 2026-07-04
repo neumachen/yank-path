@@ -30,6 +30,8 @@ pub enum YankError {
     Io(io::Error),
     /// Catch-all for misuse not covered above.
     InvalidUsage(String),
+    /// VCS operation failed (e.g. no remotes, unsupported host).
+    Vcs(String),
 }
 
 impl YankError {
@@ -48,6 +50,7 @@ impl YankError {
             YankError::ClipboardUnavailable(_) => 8,
             YankError::Io(_) => 10,
             YankError::InvalidUsage(_) => 11,
+            YankError::Vcs(_) => 12,
         }
     }
 }
@@ -81,6 +84,7 @@ impl fmt::Display for YankError {
             }
             YankError::Io(e) => write!(f, "I/O error: {e}"),
             YankError::InvalidUsage(msg) => write!(f, "invalid usage: {msg}"),
+            YankError::Vcs(msg) => write!(f, "VCS error: {msg}"),
         }
     }
 }

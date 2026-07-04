@@ -18,10 +18,10 @@ use crate::error::YankError;
     name = "yank-path",
     version,
     about = "Render and yank path strings in a chosen anchor form",
-    // `--from`, `--absolute`, `--relative-to` are mutually exclusive.
+    // `--from`, `--absolute`, `--relative-to`, `--vcs` are mutually exclusive.
     group(
         ArgGroup::new("anchor")
-            .args(["from", "absolute", "relative_to"])
+            .args(["from", "absolute", "relative_to", "vcs"])
             .multiple(false)
             .required(false),
     ),
@@ -57,6 +57,22 @@ pub struct Cli {
     /// Do not touch the system clipboard.
     #[arg(long = "no-copy")]
     pub no_copy: bool,
+
+    /// Render paths as VCS remote URLs (e.g. GitHub permalink).
+    #[arg(long = "vcs", visible_alias = "VCS")]
+    pub vcs: bool,
+
+    /// Remote name for `--vcs` (defaults to `origin`).
+    #[arg(long = "vcs-remote", value_name = "REMOTE", requires = "vcs")]
+    pub vcs_remote: Option<String>,
+
+    /// Default branch for `--vcs` (defaults to `main`).
+    #[arg(long = "vcs-default-branch", value_name = "BRANCH", requires = "vcs")]
+    pub vcs_default_branch: Option<String>,
+
+    /// Fall back to branch name when SHA is unavailable (for `--vcs`).
+    #[arg(long = "vcs-branch-fallback", requires = "vcs")]
+    pub vcs_branch_fallback: bool,
 }
 
 /// `--from` enum, with the documented aliases.
@@ -90,7 +106,7 @@ impl Cli {
     ///
     /// * Returns [`Anchor::Home`] when no anchor option was supplied.
     /// * Returns [`YankError::ConflictingAnchors`] if more than one of
-    ///   `--from`, `--absolute`, `--relative-to` was given — this is
+    ///   `--from`, `--absolute`, `--relative-to`, `--vcs` was given — this is
     ///   belt-and-braces in case clap's `ArgGroup` is bypassed (e.g. by
     ///   constructing a `Cli` value directly in a test).
     pub fn anchor(&self) -> Result<Anchor, YankError> {
@@ -102,6 +118,9 @@ impl Cli {
             count += 1;
         }
         if self.relative_to.is_some() {
+            count += 1;
+        }
+        if self.vcs {
             count += 1;
         }
         if count > 1 {
@@ -116,6 +135,9 @@ impl Cli {
         }
         if let Some(base) = &self.relative_to {
             return Ok(Anchor::RelativeTo(base.clone()));
+        }
+        if self.vcs {
+            return Ok(Anchor::Vcs);
         }
         Ok(Anchor::Home)
     }
@@ -234,6 +256,10 @@ mod tests {
             glob: vec![],
             print: false,
             no_copy: false,
+            vcs: false,
+            vcs_remote: None,
+            vcs_default_branch: None,
+            vcs_branch_fallback: false,
         };
         match cli.anchor() {
             Err(YankError::ConflictingAnchors) => {}
@@ -251,10 +277,74 @@ mod tests {
             glob: vec![],
             print: false,
             no_copy: false,
+            vcs: false,
+            vcs_remote: None,
+            vcs_default_branch: None,
+            vcs_branch_fallback: false,
         };
         match cli.anchor() {
             Err(YankError::ConflictingAnchors) => {}
             other => panic!("expected ConflictingAnchors, got {other:?}"),
         }
+    }
+
+    // --- VCS flag tests (Phase 1) ---
+
+    #[test]
+    fn parses_vcs_flag_and_returns_vcs_anchor() {
+        let cli = parse(&["--vcs"]);
+        assert!(cli.vcs);
+        assert_eq!(cli.anchor().unwrap(), Anchor::Vcs);
+    }
+
+    #[test]
+    fn parses_uppercase_vcs_alias() {
+        let cli = parse(&["--VCS"]);
+        assert!(cli.vcs);
+        assert_eq!(cli.anchor().unwrap(), Anchor::Vcs);
+    }
+
+    #[test]
+    fn vcs_conflicts_with_absolute() {
+        let err = Cli::try_parse_from(["yank-path", "--vcs", "--absolute"]).unwrap_err();
+        assert_eq!(
+            err.kind(),
+            clap::error::ErrorKind::ArgumentConflict,
+            "expected ArgumentConflict, got: {err}"
+        );
+    }
+
+    #[test]
+    fn vcs_remote_requires_vcs() {
+        let err = Cli::try_parse_from(["yank-path", "--vcs-remote", "origin"]).unwrap_err();
+        // Clap should reject missing required `--vcs`.
+        assert!(
+            matches!(err.kind(), clap::error::ErrorKind::MissingRequiredArgument),
+            "expected MissingRequiredArgument, got: {err}"
+        );
+    }
+
+    #[test]
+    fn vcs_default_branch_requires_vcs() {
+        let err = Cli::try_parse_from(["yank-path", "--vcs-default-branch", "main"]).unwrap_err();
+        assert!(
+            matches!(err.kind(), clap::error::ErrorKind::MissingRequiredArgument),
+            "expected MissingRequiredArgument, got: {err}"
+        );
+    }
+
+    #[test]
+    fn parses_vcs_with_remote_and_default_branch() {
+        let cli = parse(&[
+            "--vcs",
+            "--vcs-remote",
+            "upstream",
+            "--vcs-default-branch",
+            "develop",
+        ]);
+        assert!(cli.vcs);
+        assert_eq!(cli.vcs_remote.as_deref(), Some("upstream"));
+        assert_eq!(cli.vcs_default_branch.as_deref(), Some("develop"));
+        assert_eq!(cli.anchor().unwrap(), Anchor::Vcs);
     }
 }
