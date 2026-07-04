@@ -18,14 +18,9 @@ mold = "latest"
 [env]
 CARGO_TERM_COLOR = "always"
 
-# Put mold's real install bin dir ahead of mise's shims so `-fuse-ld=mold`
-# resolves the actual `ld.mold` binary instead of the mise shim (which cannot
-# self-resolve when invoked by the linker driver).
-_.path = ["{{ exec(command='dirname \"$(mise which mold)\"') }}"]
-
 # Use the mold linker for faster dev builds. Both common Linux targets are
 # covered because Cargo only applies CARGO_TARGET_<TRIPLE>_* for the exact
-# build triple; x86_64-only keys are silently ignored on aarch64 hosts.
+# build triple, so the x86_64-only key is silently ignored on aarch64 hosts.
 CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS = "-C link-arg=-fuse-ld=mold"
 CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS = "-C link-arg=-fuse-ld=mold"
 
