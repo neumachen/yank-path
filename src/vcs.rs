@@ -203,10 +203,162 @@ fn check_ahead_of_remote(
 }
 
 // ---------------------------------------------------------------------------
-// Test-only fake
+// Remote verification
 // ---------------------------------------------------------------------------
 
-/// Test fake that returns configurable VcsInfo.
+/// Outcome of an opt-in remote verification.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum VerifyOutcome {
+    /// Ref confirmed to exist on the remote.
+    Present,
+    /// Remote answered successfully, but the ref is not found.
+    Absent,
+    /// Could not get a clean answer (unreachable, auth, timeout, git missing, etc.).
+    /// The String is a short reason for display.
+    Unverified(String),
+}
+
+/// DI trait: verify a ref exists on a remote, via subprocess with timeout.
+///
+/// This is only invoked when `--vcs-verify` is passed. Implementations MUST
+/// enforce a timeout and kill the subprocess if it exceeds the deadline.
+pub trait RemoteVerifier {
+    /// Check whether `git_ref` (a 40-hex SHA or branch name) exists on the remote.
+    ///
+    /// Uses `git ls-remote` with the REMOTE NAME (not URL) so git uses the
+    /// user's configured auth/credential-helpers.
+    fn verify(&self, git_root: &Path, remote: &str, git_ref: &str) -> VerifyOutcome;
+}
+
+/// Real implementation using `git ls-remote` with a timeout.
+///
+/// The subprocess is spawned and polled; if it exceeds the timeout, it is
+/// killed and `Unverified("timed out")` is returned.
+#[derive(Debug, Clone)]
+pub struct GitLsRemoteVerifier {
+    timeout: std::time::Duration,
+}
+
+impl Default for GitLsRemoteVerifier {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl GitLsRemoteVerifier {
+    /// Create a verifier with the default 5-second timeout.
+    pub fn new() -> Self {
+        Self {
+            timeout: std::time::Duration::from_secs(5),
+        }
+    }
+
+    /// Create a verifier with a custom timeout.
+    pub fn with_timeout(timeout: std::time::Duration) -> Self {
+        Self { timeout }
+    }
+}
+
+impl RemoteVerifier for GitLsRemoteVerifier {
+    fn verify(&self, git_root: &Path, remote: &str, git_ref: &str) -> VerifyOutcome {
+        use std::io::Read;
+        use std::process::{Command, Stdio};
+
+        // Spawn `git -C <git_root> ls-remote <remote>` with env vars to
+        // suppress interactive credential prompts.
+        let mut child = match Command::new("git")
+            .args(["-C", &git_root.to_string_lossy(), "ls-remote", remote])
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .env("GIT_SSH_COMMAND", "ssh -oBatchMode=yes")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+        {
+            Ok(c) => c,
+            Err(_) => return VerifyOutcome::Unverified("git not available".to_string()),
+        };
+
+        // Poll with timeout
+        let deadline = std::time::Instant::now() + self.timeout;
+        loop {
+            match child.try_wait() {
+                Ok(Some(status)) => {
+                    // Child exited
+                    if !status.success() {
+                        return VerifyOutcome::Unverified("git ls-remote failed".to_string());
+                    }
+                    // Read stdout
+                    let mut stdout = String::new();
+                    if let Some(mut out) = child.stdout.take() {
+                        let _ = out.read_to_string(&mut stdout);
+                    }
+                    return parse_ls_remote_output(&stdout, git_ref);
+                }
+                Ok(None) => {
+                    // Still running
+                    if std::time::Instant::now() >= deadline {
+                        let _ = child.kill();
+                        let _ = child.wait(); // Reap
+                        return VerifyOutcome::Unverified("timed out".to_string());
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(25));
+                }
+                Err(_) => {
+                    return VerifyOutcome::Unverified("git ls-remote failed".to_string());
+                }
+            }
+        }
+    }
+}
+
+/// Parse `git ls-remote` output to determine if a ref is present.
+///
+/// Output format is `<sha>\t<ref>\n` per line.
+///
+/// - If `git_ref` is a 40-hex SHA, check if any line's SHA matches.
+/// - Otherwise treat it as a branch name and check for `refs/heads/<branch>`.
+fn parse_ls_remote_output(output: &str, git_ref: &str) -> VerifyOutcome {
+    if output.trim().is_empty() {
+        return VerifyOutcome::Unverified("empty response".to_string());
+    }
+
+    let is_sha = git_ref.len() == 40 && git_ref.chars().all(|c| c.is_ascii_hexdigit());
+
+    for line in output.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        // Format: <sha>\t<ref>
+        let parts: Vec<&str> = line.split('\t').collect();
+        if parts.len() < 2 {
+            continue;
+        }
+        let sha = parts[0];
+        let ref_name = parts[1];
+
+        if is_sha {
+            // Match SHA directly
+            if sha == git_ref {
+                return VerifyOutcome::Present;
+            }
+        } else {
+            // Match branch name
+            let full_ref = format!("refs/heads/{git_ref}");
+            if ref_name == full_ref || ref_name == git_ref {
+                return VerifyOutcome::Present;
+            }
+        }
+    }
+
+    VerifyOutcome::Absent
+}
+
+// ---------------------------------------------------------------------------
+// Test-only fakes
+// ---------------------------------------------------------------------------
+
+/// Test fake for VcsInfoProvider that returns configurable VcsInfo.
 #[cfg(test)]
 pub struct FakeVcsInfoProvider {
     pub info: VcsInfo,
@@ -236,6 +388,38 @@ impl FakeVcsInfoProvider {
 impl VcsInfoProvider for FakeVcsInfoProvider {
     fn info(&self, _git_root: &Path, _remote: &str) -> Result<VcsInfo, YankError> {
         Ok(self.info.clone())
+    }
+}
+
+/// Test fake for RemoteVerifier that returns a preset outcome.
+#[cfg(test)]
+pub struct FakeRemoteVerifier {
+    pub outcome: VerifyOutcome,
+}
+
+#[cfg(test)]
+impl FakeRemoteVerifier {
+    pub fn new(outcome: VerifyOutcome) -> Self {
+        Self { outcome }
+    }
+
+    pub fn present() -> Self {
+        Self::new(VerifyOutcome::Present)
+    }
+
+    pub fn absent() -> Self {
+        Self::new(VerifyOutcome::Absent)
+    }
+
+    pub fn unverified(reason: &str) -> Self {
+        Self::new(VerifyOutcome::Unverified(reason.to_string()))
+    }
+}
+
+#[cfg(test)]
+impl RemoteVerifier for FakeRemoteVerifier {
+    fn verify(&self, _git_root: &Path, _remote: &str, _git_ref: &str) -> VerifyOutcome {
+        self.outcome.clone()
     }
 }
 
@@ -500,5 +684,73 @@ mod tests {
             info.sha.as_deref(),
             Some("abc1234567890123456789012345678901234567")
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // parse_ls_remote_output tests (remote verification)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn ls_remote_sha_present() {
+        let output = "abc1234567890123456789012345678901234567\trefs/heads/main\n\
+                      def0000000000000000000000000000000000000\trefs/heads/develop\n";
+        let result = parse_ls_remote_output(output, "abc1234567890123456789012345678901234567");
+        assert_eq!(result, VerifyOutcome::Present);
+    }
+
+    #[test]
+    fn ls_remote_sha_absent() {
+        let output = "abc1234567890123456789012345678901234567\trefs/heads/main\n";
+        let result = parse_ls_remote_output(output, "0000000000000000000000000000000000000000");
+        assert_eq!(result, VerifyOutcome::Absent);
+    }
+
+    #[test]
+    fn ls_remote_branch_present_with_refs_heads() {
+        let output = "abc1234567890123456789012345678901234567\trefs/heads/main\n\
+                      def0000000000000000000000000000000000000\trefs/heads/develop\n";
+        let result = parse_ls_remote_output(output, "develop");
+        assert_eq!(result, VerifyOutcome::Present);
+    }
+
+    #[test]
+    fn ls_remote_branch_absent() {
+        let output = "abc1234567890123456789012345678901234567\trefs/heads/main\n";
+        let result = parse_ls_remote_output(output, "feature-xyz");
+        assert_eq!(result, VerifyOutcome::Absent);
+    }
+
+    #[test]
+    fn ls_remote_empty_output_is_unverified() {
+        let result = parse_ls_remote_output("", "main");
+        assert_eq!(
+            result,
+            VerifyOutcome::Unverified("empty response".to_string())
+        );
+    }
+
+    #[test]
+    fn ls_remote_whitespace_only_is_unverified() {
+        let result = parse_ls_remote_output("   \n  \t  \n", "main");
+        assert_eq!(
+            result,
+            VerifyOutcome::Unverified("empty response".to_string())
+        );
+    }
+
+    #[test]
+    fn ls_remote_sha_present_in_tags() {
+        // SHA can appear in any ref, not just heads
+        let output = "abc1234567890123456789012345678901234567\trefs/tags/v1.0.0\n";
+        let result = parse_ls_remote_output(output, "abc1234567890123456789012345678901234567");
+        assert_eq!(result, VerifyOutcome::Present);
+    }
+
+    #[test]
+    fn ls_remote_branch_bare_name_match() {
+        // Some git servers return bare branch names
+        let output = "abc1234567890123456789012345678901234567\tmain\n";
+        let result = parse_ls_remote_output(output, "main");
+        assert_eq!(result, VerifyOutcome::Present);
     }
 }

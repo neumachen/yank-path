@@ -25,4 +25,7 @@ pub use clipboard::{
 pub use error::YankError;
 pub use fs::{FileSystem, OsFileSystem};
 pub use gitroot::{GitRootDetector, WalkUpGitRootDetector};
-pub use vcs::{GitDirVcsInfoProvider, VcsInfo, VcsInfoProvider};
+pub use vcs::{
+    GitDirVcsInfoProvider, GitLsRemoteVerifier, RemoteVerifier, VcsInfo, VcsInfoProvider,
+    VerifyOutcome,
+};

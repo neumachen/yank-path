@@ -11,8 +11,8 @@ use std::process::ExitCode;
 use clap::Parser;
 
 use yank_path::{
-    App, ArboardClipboard, Cli, GitDirVcsInfoProvider, OsFileSystem, StdoutSink,
-    WalkUpGitRootDetector, YankError,
+    App, ArboardClipboard, Cli, GitDirVcsInfoProvider, GitLsRemoteVerifier, OsFileSystem,
+    StdoutSink, WalkUpGitRootDetector, YankError,
 };
 
 fn main() -> ExitCode {
@@ -21,10 +21,18 @@ fn main() -> ExitCode {
     let fs = OsFileSystem::new();
     let git_detector = WalkUpGitRootDetector::new();
     let vcs_provider = GitDirVcsInfoProvider::new();
+    let verifier = GitLsRemoteVerifier::new();
     let mut clipboard = ArboardClipboard::new();
     let mut sink = StdoutSink;
 
-    let mut app = App::new(&fs, &git_detector, &vcs_provider, &mut clipboard, &mut sink);
+    let mut app = App::new(
+        &fs,
+        &git_detector,
+        &vcs_provider,
+        &verifier,
+        &mut clipboard,
+        &mut sink,
+    );
 
     match app.run(&cli) {
         Ok(code) => ExitCode::from(code as u8),

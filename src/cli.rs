@@ -73,6 +73,14 @@ pub struct Cli {
     /// Fall back to branch name when SHA is unavailable (for `--vcs`).
     #[arg(long = "vcs-branch-fallback", requires = "vcs")]
     pub vcs_branch_fallback: bool,
+
+    /// Verify the ref exists on the remote via `git ls-remote` (for `--vcs`).
+    ///
+    /// This spawns a subprocess with a timeout. If the remote is unreachable,
+    /// private, or verification times out, a note is emitted but the URL is
+    /// still produced. Only adds a warning when the ref is definitively absent.
+    #[arg(long = "vcs-verify", requires = "vcs")]
+    pub vcs_verify: bool,
 }
 
 /// `--from` enum, with the documented aliases.
@@ -260,6 +268,7 @@ mod tests {
             vcs_remote: None,
             vcs_default_branch: None,
             vcs_branch_fallback: false,
+            vcs_verify: false,
         };
         match cli.anchor() {
             Err(YankError::ConflictingAnchors) => {}
@@ -281,6 +290,7 @@ mod tests {
             vcs_remote: None,
             vcs_default_branch: None,
             vcs_branch_fallback: false,
+            vcs_verify: false,
         };
         match cli.anchor() {
             Err(YankError::ConflictingAnchors) => {}
@@ -346,5 +356,21 @@ mod tests {
         assert_eq!(cli.vcs_remote.as_deref(), Some("upstream"));
         assert_eq!(cli.vcs_default_branch.as_deref(), Some("develop"));
         assert_eq!(cli.anchor().unwrap(), Anchor::Vcs);
+    }
+
+    #[test]
+    fn vcs_verify_requires_vcs() {
+        let err = Cli::try_parse_from(["yank-path", "--vcs-verify"]).unwrap_err();
+        assert!(
+            matches!(err.kind(), clap::error::ErrorKind::MissingRequiredArgument),
+            "expected MissingRequiredArgument, got: {err}"
+        );
+    }
+
+    #[test]
+    fn parses_vcs_verify_flag() {
+        let cli = parse(&["--vcs", "--vcs-verify"]);
+        assert!(cli.vcs);
+        assert!(cli.vcs_verify);
     }
 }

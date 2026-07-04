@@ -19,7 +19,7 @@ use crate::fs::FileSystem;
 use crate::gitroot::GitRootDetector;
 use crate::glob::expand_globs;
 use crate::resolve::resolve_operands;
-use crate::vcs::VcsInfoProvider;
+use crate::vcs::{RemoteVerifier, VcsInfoProvider, VerifyOutcome};
 
 use std::path::PathBuf;
 
@@ -27,11 +27,12 @@ use std::path::PathBuf;
 ///
 /// All collaborators are injected as trait objects. Clipboard and output
 /// sink are `&mut` because they mutate (write text); filesystem,
-/// git-root detector, and VCS info provider are read-only.
+/// git-root detector, VCS info provider, and remote verifier are read-only.
 pub struct App<'a> {
     fs: &'a dyn FileSystem,
     git_detector: &'a dyn GitRootDetector,
     vcs_provider: &'a dyn VcsInfoProvider,
+    verifier: &'a dyn RemoteVerifier,
     clipboard: &'a mut dyn Clipboard,
     sink: &'a mut dyn OutputSink,
 }
@@ -42,6 +43,7 @@ impl<'a> App<'a> {
         fs: &'a dyn FileSystem,
         git_detector: &'a dyn GitRootDetector,
         vcs_provider: &'a dyn VcsInfoProvider,
+        verifier: &'a dyn RemoteVerifier,
         clipboard: &'a mut dyn Clipboard,
         sink: &'a mut dyn OutputSink,
     ) -> Self {
@@ -49,6 +51,7 @@ impl<'a> App<'a> {
             fs,
             git_detector,
             vcs_provider,
+            verifier,
             clipboard,
             sink,
         }
@@ -111,15 +114,16 @@ impl<'a> App<'a> {
         };
 
         // For VCS anchor, we need to resolve VcsInfo first and render with VcsRenderer.
-        // We also emit offline warnings for suspicious local state.
-        let (rendered, vcs_warning) = if anchor == crate::anchor::Anchor::Vcs {
+        // We also emit offline warnings for suspicious local state, and optionally
+        // verify the ref exists on the remote.
+        let (rendered, stderr_lines) = if anchor == crate::anchor::Anchor::Vcs {
             self.render_vcs(&resolved, &ctx, cli, git_root.as_ref())?
         } else {
             let mut rendered: Vec<String> = Vec::with_capacity(resolved.len());
             for path in &resolved {
                 rendered.push(render_with(&anchor, path, &ctx)?);
             }
-            (rendered, None)
+            (rendered, Vec::new())
         };
         let joined = rendered.join("\n");
 
@@ -159,10 +163,10 @@ impl<'a> App<'a> {
             self.sink.write_line(&joined)?;
         }
 
-        // Emit VCS warning to stderr (if any) AFTER output, so it doesn't
-        // pollute stdout/clipboard content.
-        if let Some(warning) = vcs_warning {
-            eprintln!("{warning}");
+        // Emit VCS stderr lines (offline warning and/or verify output) AFTER
+        // output, so they don't pollute stdout/clipboard content.
+        for line in &stderr_lines {
+            eprintln!("{line}");
         }
 
         self.sink.flush()?;
@@ -171,28 +175,32 @@ impl<'a> App<'a> {
 
     /// Render paths using the VCS URL anchor.
     ///
-    /// Returns the rendered strings and an optional warning message to emit
-    /// to stderr. The warning is emitted when local state suggests the
-    /// generated URLs might not work (detached HEAD, no upstream, or ahead
-    /// of remote).
+    /// Returns the rendered strings and a list of stderr lines to emit (offline
+    /// warnings and/or verification output). The offline warning is emitted
+    /// when local state suggests the generated URLs might not work (detached
+    /// HEAD, no upstream, or ahead of remote). When `--vcs-verify` is enabled,
+    /// we also check if the ref exists on the remote.
     fn render_vcs(
         &self,
         resolved: &[PathBuf],
         ctx: &RenderContext<'_>,
         cli: &Cli,
         git_root: Option<&PathBuf>,
-    ) -> Result<(Vec<String>, Option<String>), YankError> {
+    ) -> Result<(Vec<String>, Vec<String>), YankError> {
         let git_root = git_root.ok_or_else(|| YankError::Vcs("not in a repository".to_string()))?;
 
         let remote = cli.vcs_remote.as_deref().unwrap_or("origin");
         let vcs_info = self.vcs_provider.info(git_root, remote)?;
 
-        // Build warning message if local state is suspicious
-        let warning = build_vcs_warning(&vcs_info, remote);
+        // Build offline warning message if local state is suspicious
+        let mut stderr_lines = Vec::new();
+        if let Some(warning) = build_vcs_warning(&vcs_info, remote) {
+            stderr_lines.push(warning);
+        }
 
         // Construct the renderer
         let renderer = VcsRenderer::new(
-            vcs_info,
+            vcs_info.clone(),
             cli.vcs_default_branch.clone(),
             cli.vcs_branch_fallback,
         );
@@ -202,7 +210,46 @@ impl<'a> App<'a> {
             rendered.push(renderer.render(path, ctx)?);
         }
 
-        Ok((rendered, warning))
+        // Opt-in remote verification (--vcs-verify)
+        if cli.vcs_verify {
+            // Determine the ref that was used in the URL — same logic as VcsRenderer
+            let git_ref = if let Some(ref sha) = vcs_info.sha {
+                sha.clone()
+            } else if cli.vcs_branch_fallback {
+                cli.vcs_default_branch
+                    .clone()
+                    .or(vcs_info.branch.clone())
+                    .unwrap_or_else(|| "main".to_string())
+            } else {
+                // No SHA and no branch fallback — this would have errored in render(),
+                // but be defensive here
+                "main".to_string()
+            };
+
+            let outcome = self.verifier.verify(git_root, remote, &git_ref);
+            match outcome {
+                VerifyOutcome::Present => {
+                    // Confirmed on remote — no message
+                }
+                VerifyOutcome::Absent => {
+                    let ref_short = if git_ref.len() == 40 {
+                        &git_ref[..7]
+                    } else {
+                        &git_ref
+                    };
+                    stderr_lines.push(format!(
+                        "yank-path: warning: {ref_short} not found on remote '{remote}'"
+                    ));
+                }
+                VerifyOutcome::Unverified(reason) => {
+                    stderr_lines.push(format!(
+                        "yank-path: note: could not verify against remote '{remote}' ({reason})"
+                    ));
+                }
+            }
+        }
+
+        Ok((rendered, stderr_lines))
     }
 }
 
@@ -343,6 +390,15 @@ mod tests {
         }
     }
 
+    /// A `RemoteVerifier` that always returns Present — fine for tests that
+    /// don't exercise `--vcs-verify`.
+    struct NoVerify;
+    impl RemoteVerifier for NoVerify {
+        fn verify(&self, _git_root: &Path, _remote: &str, _git_ref: &str) -> VerifyOutcome {
+            VerifyOutcome::Present
+        }
+    }
+
     /// Build a default-ish `Cli` value programmatically so tests don't have
     /// to fight clap.
     fn cli_with(paths: Vec<PathBuf>) -> Cli {
@@ -358,6 +414,7 @@ mod tests {
             vcs_remote: None,
             vcs_default_branch: None,
             vcs_branch_fallback: false,
+            vcs_verify: false,
         }
     }
 
@@ -377,7 +434,7 @@ mod tests {
         let mut sink = BufferSink::new();
 
         let cli = cli_with(vec![]);
-        let code = App::new(&fs, &git, &NoVcs, &mut clip, &mut sink)
+        let code = App::new(&fs, &git, &NoVcs, &NoVerify, &mut clip, &mut sink)
             .run(&cli)
             .unwrap();
 
@@ -397,7 +454,7 @@ mod tests {
 
         let mut cli = cli_with(vec![]);
         cli.print = true;
-        let code = App::new(&fs, &git, &NoVcs, &mut clip, &mut sink)
+        let code = App::new(&fs, &git, &NoVcs, &NoVerify, &mut clip, &mut sink)
             .run(&cli)
             .unwrap();
 
@@ -418,7 +475,7 @@ mod tests {
         let mut cli = cli_with(vec![]);
         cli.no_copy = true;
         cli.print = true;
-        let code = App::new(&fs, &git, &NoVcs, &mut clip, &mut sink)
+        let code = App::new(&fs, &git, &NoVcs, &NoVerify, &mut clip, &mut sink)
             .run(&cli)
             .unwrap();
 
@@ -442,7 +499,7 @@ mod tests {
 
         let mut cli = cli_with(vec![]);
         cli.no_copy = true;
-        let code = App::new(&fs, &git, &NoVcs, &mut clip, &mut sink)
+        let code = App::new(&fs, &git, &NoVcs, &NoVerify, &mut clip, &mut sink)
             .run(&cli)
             .unwrap();
 
@@ -461,7 +518,7 @@ mod tests {
         let mut sink = BufferSink::new();
 
         let cli = cli_with(vec![]);
-        let code = App::new(&fs, &git, &NoVcs, &mut clip, &mut sink)
+        let code = App::new(&fs, &git, &NoVcs, &NoVerify, &mut clip, &mut sink)
             .run(&cli)
             .unwrap();
 
@@ -481,7 +538,7 @@ mod tests {
 
         let mut cli = cli_with(vec![]);
         cli.print = true;
-        let code = App::new(&fs, &git, &NoVcs, &mut clip, &mut sink)
+        let code = App::new(&fs, &git, &NoVcs, &NoVerify, &mut clip, &mut sink)
             .run(&cli)
             .unwrap();
 
@@ -501,7 +558,7 @@ mod tests {
         let mut sink = BufferSink::new();
 
         let cli = cli_with(vec![PathBuf::from("a.txt"), PathBuf::from("b.txt")]);
-        let code = App::new(&fs, &git, &NoVcs, &mut clip, &mut sink)
+        let code = App::new(&fs, &git, &NoVcs, &NoVerify, &mut clip, &mut sink)
             .run(&cli)
             .unwrap();
 
@@ -523,7 +580,7 @@ mod tests {
         let mut sink = BufferSink::new();
 
         let cli = cli_with(vec![PathBuf::from("a.txt"), PathBuf::from("missing.txt")]);
-        let err = App::new(&fs, &git, &NoVcs, &mut clip, &mut sink)
+        let err = App::new(&fs, &git, &NoVcs, &NoVerify, &mut clip, &mut sink)
             .run(&cli)
             .unwrap_err();
 
@@ -583,7 +640,7 @@ mod tests {
         let mut cli = cli_with(vec![]);
         cli.glob = vec!["*.nonexistent_ext".to_string()];
 
-        let err = App::new(&fs, &git, &NoVcs, &mut clip, &mut sink)
+        let err = App::new(&fs, &git, &NoVcs, &NoVerify, &mut clip, &mut sink)
             .run(&cli)
             .unwrap_err();
         match err {
@@ -616,8 +673,9 @@ mod tests {
             vcs_remote: None,
             vcs_default_branch: None,
             vcs_branch_fallback: false,
+            vcs_verify: false,
         };
-        let err = App::new(&fs, &git, &NoVcs, &mut clip, &mut sink)
+        let err = App::new(&fs, &git, &NoVcs, &NoVerify, &mut clip, &mut sink)
             .run(&cli)
             .unwrap_err();
         assert!(matches!(err, YankError::ConflictingAnchors));
@@ -633,7 +691,7 @@ mod tests {
 
         let mut cli = cli_with(vec![PathBuf::from("a.txt")]);
         cli.absolute = true;
-        let code = App::new(&fs, &git, &NoVcs, &mut clip, &mut sink)
+        let code = App::new(&fs, &git, &NoVcs, &NoVerify, &mut clip, &mut sink)
             .run(&cli)
             .unwrap();
 
