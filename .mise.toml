@@ -1,0 +1,86 @@
+[tools]
+rust = "stable"
+
+# Cargo extensions (installed via cargo-binstall or cargo install)
+"cargo:cargo-audit" = "latest"
+"cargo:cargo-deny" = "latest"
+"cargo:cargo-tarpaulin" = "latest"
+"cargo:cargo-watch" = "latest"
+"cargo:cargo-udeps" = "latest"
+"cargo:cargo-bloat" = "latest"
+"cargo:cargo-expand" = "latest"
+"cargo:cargo-nextest" = "latest"
+
+[env]
+CARGO_TERM_COLOR = "always"
+# Use mold linker for faster dev builds (Linux x86_64)
+CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER = "clang"
+CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS = "-C link-arg=-fuse-ld=mold"
+
+[tasks.setup]
+description = "Install rustup components (rust-analyzer, rustfmt, clippy)"
+run = "rustup component add rust-analyzer rustfmt clippy"
+
+[tasks.fmt]
+description = "Format code with rustfmt"
+run = "cargo fmt --all"
+
+[tasks.fmt-check]
+description = "Check formatting"
+run = "cargo fmt --all --check"
+
+[tasks.lint]
+description = "Run clippy lints"
+run = "cargo clippy --all-targets --all-features -- -D warnings"
+
+[tasks.test]
+description = "Run all tests with nextest"
+run = "cargo nextest run --all-features"
+
+[tasks.test-cargo]
+description = "Run tests with cargo test (fallback)"
+run = "cargo test --all --all-features"
+
+[tasks.build]
+description = "Build release binary"
+run = "cargo build --release --locked"
+
+[tasks.check]
+description = "Full CI check: fmt + lint + test"
+depends = ["fmt-check", "lint", "test"]
+
+[tasks.audit]
+description = "Security audit dependencies"
+run = "cargo audit"
+
+[tasks.deny]
+description = "Check licenses, duplicates, sources"
+run = "cargo deny check"
+
+[tasks.coverage]
+description = "Generate code coverage report"
+run = "cargo tarpaulin --all-features --out Html"
+
+[tasks.watch]
+description = "Watch and rebuild on changes"
+run = "cargo watch -x check -x test"
+
+[tasks.udeps]
+description = "Find unused dependencies (requires nightly)"
+run = "cargo +nightly udeps --all-targets"
+
+[tasks.bloat]
+description = "Analyze binary size"
+run = "cargo bloat --release"
+
+[tasks.expand]
+description = "Expand macros in lib"
+run = "cargo expand --lib"
+
+[tasks.doc]
+description = "Build and open documentation"
+run = "cargo doc --all-features --open"
+
+[tasks.clean]
+description = "Clean build artifacts"
+run = "cargo clean"
