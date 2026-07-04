@@ -10,6 +10,7 @@ rust = "stable"
 "cargo:cargo-bloat" = "latest"
 "cargo:cargo-expand" = "latest"
 "cargo:cargo-nextest" = "latest"
+"cargo:cargo-criterion" = "latest"
 
 [env]
 CARGO_TERM_COLOR = "always"
@@ -76,6 +77,10 @@ run = "cargo bloat --release"
 [tasks.expand]
 description = "Expand macros in lib"
 run = "cargo expand --lib"
+
+[tasks.bench]
+description = "Run benchmarks with criterion"
+run = "cargo criterion"
 
 [tasks.doc]
 description = "Build and open documentation"
