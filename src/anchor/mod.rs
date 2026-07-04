@@ -21,6 +21,7 @@ pub mod git;
 pub mod home;
 pub mod parent;
 pub mod relative_to;
+pub mod vcs;
 
 pub use absolute::AbsoluteRenderer;
 pub use base::BaseRenderer;
@@ -28,9 +29,10 @@ pub use git::GitRenderer;
 pub use home::HomeRenderer;
 pub use parent::ParentRenderer;
 pub use relative_to::RelativeToRenderer;
+pub use vcs::VcsRenderer;
 
 /// Anchor selection — one variant per `--from` / `--absolute` /
-/// `--relative-to` option exposed by the CLI.
+/// `--relative-to` / `--vcs` option exposed by the CLI.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Anchor {
     /// `~/...` form when target is inside `$HOME`; fall back to absolute
@@ -46,6 +48,8 @@ pub enum Anchor {
     Absolute,
     /// Path relative to a user-supplied base directory.
     RelativeTo(PathBuf),
+    /// VCS remote link (e.g. GitHub URL for the file/directory).
+    Vcs,
 }
 
 /// Read-only context passed to every renderer.
@@ -83,6 +87,14 @@ pub fn render_with(
         Anchor::Git => GitRenderer.render(target, ctx),
         Anchor::Absolute => AbsoluteRenderer.render(target, ctx),
         Anchor::RelativeTo(base) => RelativeToRenderer::new(base.clone()).render(target, ctx),
+        Anchor::Vcs => {
+            // VCS anchor is handled specially in App::run because VcsRenderer
+            // requires resolved VcsInfo from the VcsInfoProvider. This arm
+            // should never be reached in normal operation.
+            Err(YankError::Vcs(
+                "VCS anchor must be handled by App, not render_with".to_string(),
+            ))
+        }
     }
 }
 

@@ -1,9 +1,9 @@
 //! Application pipeline (Phase 8).
 //!
 //! [`App`] is the orchestrator that glues the injected collaborators —
-//! filesystem, git-root detector, clipboard, output sink — together and
-//! runs the resolve → glob → render → emit pipeline driven by a parsed
-//! [`Cli`].
+//! filesystem, git-root detector, vcs-info provider, clipboard, output sink —
+//! together and runs the resolve → glob → render → emit pipeline driven by a
+//! parsed [`Cli`].
 //!
 //! The composition root in `src/main.rs` constructs real implementations
 //! and hands them to `App::run`. Tests construct in-memory fakes (see
@@ -11,7 +11,7 @@
 //! and the per-test `MockFileSystem` defined below) and drive the same
 //! `run` method, which is the only path that exercises the pipeline.
 
-use crate::anchor::{render_with, RenderContext};
+use crate::anchor::{render_with, AnchorRenderer, RenderContext, VcsRenderer};
 use crate::cli::Cli;
 use crate::clipboard::{Clipboard, OutputSink};
 use crate::error::YankError;
@@ -19,17 +19,19 @@ use crate::fs::FileSystem;
 use crate::gitroot::GitRootDetector;
 use crate::glob::expand_globs;
 use crate::resolve::resolve_operands;
+use crate::vcs::VcsInfoProvider;
 
 use std::path::PathBuf;
 
 /// Pipeline orchestrator.
 ///
 /// All collaborators are injected as trait objects. Clipboard and output
-/// sink are `&mut` because they mutate (write text); filesystem and
-/// git-root detector are read-only.
+/// sink are `&mut` because they mutate (write text); filesystem,
+/// git-root detector, and VCS info provider are read-only.
 pub struct App<'a> {
     fs: &'a dyn FileSystem,
     git_detector: &'a dyn GitRootDetector,
+    vcs_provider: &'a dyn VcsInfoProvider,
     clipboard: &'a mut dyn Clipboard,
     sink: &'a mut dyn OutputSink,
 }
@@ -39,12 +41,14 @@ impl<'a> App<'a> {
     pub fn new(
         fs: &'a dyn FileSystem,
         git_detector: &'a dyn GitRootDetector,
+        vcs_provider: &'a dyn VcsInfoProvider,
         clipboard: &'a mut dyn Clipboard,
         sink: &'a mut dyn OutputSink,
     ) -> Self {
         Self {
             fs,
             git_detector,
+            vcs_provider,
             clipboard,
             sink,
         }
@@ -102,14 +106,21 @@ impl<'a> App<'a> {
         let ctx = RenderContext {
             cwd,
             home,
-            git_root,
+            git_root: git_root.clone(),
             fs: self.fs,
         };
 
-        let mut rendered: Vec<String> = Vec::with_capacity(resolved.len());
-        for path in &resolved {
-            rendered.push(render_with(&anchor, path, &ctx)?);
-        }
+        // For VCS anchor, we need to resolve VcsInfo first and render with VcsRenderer.
+        // We also emit offline warnings for suspicious local state.
+        let (rendered, vcs_warning) = if anchor == crate::anchor::Anchor::Vcs {
+            self.render_vcs(&resolved, &ctx, cli, git_root.as_ref())?
+        } else {
+            let mut rendered: Vec<String> = Vec::with_capacity(resolved.len());
+            for path in &resolved {
+                rendered.push(render_with(&anchor, path, &ctx)?);
+            }
+            (rendered, None)
+        };
         let joined = rendered.join("\n");
 
         // --- Emit ------------------------------------------------------------
@@ -148,9 +159,86 @@ impl<'a> App<'a> {
             self.sink.write_line(&joined)?;
         }
 
+        // Emit VCS warning to stderr (if any) AFTER output, so it doesn't
+        // pollute stdout/clipboard content.
+        if let Some(warning) = vcs_warning {
+            eprintln!("{warning}");
+        }
+
         self.sink.flush()?;
         Ok(0)
     }
+
+    /// Render paths using the VCS URL anchor.
+    ///
+    /// Returns the rendered strings and an optional warning message to emit
+    /// to stderr. The warning is emitted when local state suggests the
+    /// generated URLs might not work (detached HEAD, no upstream, or ahead
+    /// of remote).
+    fn render_vcs(
+        &self,
+        resolved: &[PathBuf],
+        ctx: &RenderContext<'_>,
+        cli: &Cli,
+        git_root: Option<&PathBuf>,
+    ) -> Result<(Vec<String>, Option<String>), YankError> {
+        let git_root = git_root.ok_or_else(|| YankError::Vcs("not in a repository".to_string()))?;
+
+        let remote = cli.vcs_remote.as_deref().unwrap_or("origin");
+        let vcs_info = self.vcs_provider.info(git_root, remote)?;
+
+        // Build warning message if local state is suspicious
+        let warning = build_vcs_warning(&vcs_info, remote);
+
+        // Construct the renderer
+        let renderer = VcsRenderer::new(
+            vcs_info,
+            cli.vcs_default_branch.clone(),
+            cli.vcs_branch_fallback,
+        );
+
+        let mut rendered: Vec<String> = Vec::with_capacity(resolved.len());
+        for path in resolved {
+            rendered.push(renderer.render(path, ctx)?);
+        }
+
+        Ok((rendered, warning))
+    }
+}
+
+/// Build a warning message for VCS state that might cause URL issues.
+///
+/// Returns `Some(warning)` if any of these conditions hold:
+/// - Detached HEAD (commit might be orphaned)
+/// - No upstream configured (branch might not exist on remote)
+/// - Local ahead of remote (commits might not be pushed)
+fn build_vcs_warning(info: &crate::vcs::VcsInfo, remote: &str) -> Option<String> {
+    let sha_short = info
+        .sha
+        .as_ref()
+        .map(|s| &s[..7.min(s.len())])
+        .unwrap_or("unknown");
+
+    let mut reasons = Vec::new();
+
+    if info.detached {
+        reasons.push("detached HEAD");
+    }
+    if !info.has_upstream && info.branch.is_some() {
+        reasons.push("no upstream configured");
+    }
+    if info.ahead_of_remote {
+        reasons.push("local commits not pushed");
+    }
+
+    if reasons.is_empty() {
+        return None;
+    }
+
+    let reason_str = reasons.join(", ");
+    Some(format!(
+        "yank-path: warning: commit {sha_short} may not exist on remote '{remote}' ({reason_str})"
+    ))
 }
 
 // ---------------------------------------------------------------------------
@@ -246,6 +334,15 @@ mod tests {
         }
     }
 
+    /// A `VcsInfoProvider` that always errors — fine for tests that don't
+    /// exercise `--vcs`.
+    struct NoVcs;
+    impl VcsInfoProvider for NoVcs {
+        fn info(&self, _git_root: &Path, _remote: &str) -> Result<crate::vcs::VcsInfo, YankError> {
+            Err(YankError::Vcs("VcsInfoProvider not configured".to_string()))
+        }
+    }
+
     /// Build a default-ish `Cli` value programmatically so tests don't have
     /// to fight clap.
     fn cli_with(paths: Vec<PathBuf>) -> Cli {
@@ -257,6 +354,10 @@ mod tests {
             glob: vec![],
             print: false,
             no_copy: false,
+            vcs: false,
+            vcs_remote: None,
+            vcs_default_branch: None,
+            vcs_branch_fallback: false,
         }
     }
 
@@ -276,7 +377,9 @@ mod tests {
         let mut sink = BufferSink::new();
 
         let cli = cli_with(vec![]);
-        let code = App::new(&fs, &git, &mut clip, &mut sink).run(&cli).unwrap();
+        let code = App::new(&fs, &git, &NoVcs, &mut clip, &mut sink)
+            .run(&cli)
+            .unwrap();
 
         assert_eq!(code, 0);
         assert_eq!(clip.contents().as_deref(), Some("~/proj"));
@@ -294,7 +397,9 @@ mod tests {
 
         let mut cli = cli_with(vec![]);
         cli.print = true;
-        let code = App::new(&fs, &git, &mut clip, &mut sink).run(&cli).unwrap();
+        let code = App::new(&fs, &git, &NoVcs, &mut clip, &mut sink)
+            .run(&cli)
+            .unwrap();
 
         assert_eq!(code, 0);
         assert_eq!(clip.contents().as_deref(), Some("~/proj"));
@@ -313,7 +418,9 @@ mod tests {
         let mut cli = cli_with(vec![]);
         cli.no_copy = true;
         cli.print = true;
-        let code = App::new(&fs, &git, &mut clip, &mut sink).run(&cli).unwrap();
+        let code = App::new(&fs, &git, &NoVcs, &mut clip, &mut sink)
+            .run(&cli)
+            .unwrap();
 
         assert_eq!(code, 0);
         assert_eq!(
@@ -335,7 +442,9 @@ mod tests {
 
         let mut cli = cli_with(vec![]);
         cli.no_copy = true;
-        let code = App::new(&fs, &git, &mut clip, &mut sink).run(&cli).unwrap();
+        let code = App::new(&fs, &git, &NoVcs, &mut clip, &mut sink)
+            .run(&cli)
+            .unwrap();
 
         assert_eq!(code, 0);
         assert_eq!(clip.contents(), None);
@@ -352,7 +461,9 @@ mod tests {
         let mut sink = BufferSink::new();
 
         let cli = cli_with(vec![]);
-        let code = App::new(&fs, &git, &mut clip, &mut sink).run(&cli).unwrap();
+        let code = App::new(&fs, &git, &NoVcs, &mut clip, &mut sink)
+            .run(&cli)
+            .unwrap();
 
         assert_eq!(code, 0);
         assert_eq!(clip.contents(), None, "headless clipboard untouched");
@@ -370,7 +481,9 @@ mod tests {
 
         let mut cli = cli_with(vec![]);
         cli.print = true;
-        let code = App::new(&fs, &git, &mut clip, &mut sink).run(&cli).unwrap();
+        let code = App::new(&fs, &git, &NoVcs, &mut clip, &mut sink)
+            .run(&cli)
+            .unwrap();
 
         assert_eq!(code, 0);
         assert_eq!(sink.lines.len(), 1, "must not double-emit");
@@ -388,7 +501,9 @@ mod tests {
         let mut sink = BufferSink::new();
 
         let cli = cli_with(vec![PathBuf::from("a.txt"), PathBuf::from("b.txt")]);
-        let code = App::new(&fs, &git, &mut clip, &mut sink).run(&cli).unwrap();
+        let code = App::new(&fs, &git, &NoVcs, &mut clip, &mut sink)
+            .run(&cli)
+            .unwrap();
 
         assert_eq!(code, 0);
         assert_eq!(
@@ -408,7 +523,7 @@ mod tests {
         let mut sink = BufferSink::new();
 
         let cli = cli_with(vec![PathBuf::from("a.txt"), PathBuf::from("missing.txt")]);
-        let err = App::new(&fs, &git, &mut clip, &mut sink)
+        let err = App::new(&fs, &git, &NoVcs, &mut clip, &mut sink)
             .run(&cli)
             .unwrap_err();
 
@@ -468,7 +583,7 @@ mod tests {
         let mut cli = cli_with(vec![]);
         cli.glob = vec!["*.nonexistent_ext".to_string()];
 
-        let err = App::new(&fs, &git, &mut clip, &mut sink)
+        let err = App::new(&fs, &git, &NoVcs, &mut clip, &mut sink)
             .run(&cli)
             .unwrap_err();
         match err {
@@ -497,8 +612,12 @@ mod tests {
             glob: vec![],
             print: false,
             no_copy: false,
+            vcs: false,
+            vcs_remote: None,
+            vcs_default_branch: None,
+            vcs_branch_fallback: false,
         };
-        let err = App::new(&fs, &git, &mut clip, &mut sink)
+        let err = App::new(&fs, &git, &NoVcs, &mut clip, &mut sink)
             .run(&cli)
             .unwrap_err();
         assert!(matches!(err, YankError::ConflictingAnchors));
@@ -514,7 +633,9 @@ mod tests {
 
         let mut cli = cli_with(vec![PathBuf::from("a.txt")]);
         cli.absolute = true;
-        let code = App::new(&fs, &git, &mut clip, &mut sink).run(&cli).unwrap();
+        let code = App::new(&fs, &git, &NoVcs, &mut clip, &mut sink)
+            .run(&cli)
+            .unwrap();
 
         assert_eq!(code, 0);
         assert_eq!(clip.contents().as_deref(), Some("/home/u/proj/a.txt"));
