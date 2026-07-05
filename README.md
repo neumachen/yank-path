@@ -72,9 +72,10 @@ docker run --rm yank-path .
 ### Requirements
 
 Building or installing from source requires a stable Rust toolchain.
-The minimum supported Rust version (MSRV) is **1.74**, which CI
-enforces. No other system packages are required on Linux, macOS, or
-Windows.
+The minimum supported Rust version (MSRV) is **1.85**, which CI
+enforces. Linux and macOS are tested in CI; Windows is currently
+untested (path rendering assumes POSIX separators — Windows support is
+future work).
 
 ## Anchor modes
 
