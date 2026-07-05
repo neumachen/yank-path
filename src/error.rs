@@ -77,7 +77,7 @@ impl fmt::Display for YankError {
             }
             YankError::ConflictingAnchors => write!(
                 f,
-                "--from, --absolute and --relative-to are mutually exclusive"
+                "--from, --absolute, --relative-to and --vcs are mutually exclusive"
             ),
             YankError::ClipboardUnavailable(msg) => {
                 write!(f, "clipboard backend unavailable: {msg}")
@@ -101,5 +101,16 @@ impl std::error::Error for YankError {
 impl From<io::Error> for YankError {
     fn from(value: io::Error) -> Self {
         YankError::Io(value)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn conflicting_anchors_message_includes_vcs() {
+        let msg = YankError::ConflictingAnchors.to_string();
+        assert!(msg.contains("--vcs"), "message should mention --vcs: {msg}");
     }
 }
