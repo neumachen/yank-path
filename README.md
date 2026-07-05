@@ -4,6 +4,7 @@
 [![Docker](https://github.com/neumachen/yank-path/actions/workflows/docker.yml/badge.svg)](https://github.com/neumachen/yank-path/actions/workflows/docker.yml)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
 [![Crates.io](https://img.shields.io/crates/v/yank-path.svg)](https://crates.io/crates/yank-path)
+[![Changelog](https://img.shields.io/badge/changelog-Keep%20a%20Changelog-orange.svg)](CHANGELOG.md)
 
 `yank-path` is a small, composable Rust CLI for rendering the **textual
 representation** of one or more filesystem paths under a chosen anchor
@@ -70,10 +71,10 @@ docker run --rm yank-path .
 
 ### Requirements
 
-Building or installing from source requires a stable Rust toolchain
-(`cargo` 1.70 or newer is known to work; any reasonably current stable
-release should be fine). No other system packages are required on
-Linux, macOS, or Windows.
+Building or installing from source requires a stable Rust toolchain.
+The minimum supported Rust version (MSRV) is **1.74**, which CI
+enforces. No other system packages are required on Linux, macOS, or
+Windows.
 
 ## Anchor modes
 
@@ -307,18 +308,25 @@ yank-path --relative-to ~ ~/projects/example-repo/README.md
 `yank-path` ships with a multi-stage `Dockerfile`, a `docker-compose.yml`
 for development, and a `Makefile` that wraps the common workflows.
 
-Makefile targets:
+### Task runner
 
-| Target          | Action                                                 |
-| --------------- | ------------------------------------------------------ |
-| `build`         | `cargo build --release`                                |
-| `test`          | `cargo test`                                           |
-| `lint`          | `cargo clippy --all-targets -- -D warnings`            |
-| `fmt`           | `cargo fmt`                                            |
-| `fmt-check`     | `cargo fmt --check`                                    |
-| `docker-build`  | `docker build -t yank-path:latest .`                   |
-| `docker-test`   | `docker compose run --rm dev cargo test`               |
-| `clean`         | `cargo clean`                                          |
+The canonical task runner is **mise** (see `.mise.toml`). The `Makefile`
+targets are thin wrappers that forward to `mise run <task>`. Run
+`mise tasks` to list all available tasks, or use `mise run check` to
+run format-check, lint, and test in one command.
+
+### Makefile targets
+
+| Target          | Action                                                           |
+| --------------- | ---------------------------------------------------------------- |
+| `build`         | `cargo build --release`                                          |
+| `test`          | `cargo test`                                                     |
+| `lint`          | `cargo clippy --all-targets --all-features -- -D warnings`       |
+| `fmt`           | `cargo fmt`                                                      |
+| `fmt-check`     | `cargo fmt --check`                                              |
+| `docker-build`  | `docker build -t yank-path:latest .`                             |
+| `docker-test`   | `docker compose run --rm dev cargo test`                         |
+| `clean`         | `cargo clean`                                                    |
 
 The `dev` compose service builds the Dockerfile's `builder` stage
 (which carries the full Rust toolchain), mounts the working tree at
