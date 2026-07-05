@@ -34,3 +34,4 @@ jobs:
         run: |
           docker run --rm yank-path:ci --help
           docker run --rm yank-path:ci --print --no-copy --absolute /etc/hostname
+          docker run --rm --entrypoint git yank-path:ci --version

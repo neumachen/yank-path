@@ -78,8 +78,8 @@ Linux, macOS, or Windows.
 ## Anchor modes
 
 The anchor controls *which form* of the path string is produced.
-`--from`, `--absolute`, and `--relative-to` are **mutually exclusive**;
-supplying more than one is a usage error.
+`--from`, `--absolute`, `--relative-to`, and `--vcs` are **mutually
+exclusive**; supplying more than one is a usage error.
 
 Examples below assume the current working directory is
 `~/projects/example-repo` (i.e. `/Users/example/projects/example-repo`)
@@ -93,6 +93,7 @@ and the command is `yank-path .`.
 | git             | —        | `--from git`             | `.` (relative to repo root; errors if not in a repo)                  |
 | absolute        | —        | `--absolute`             | `/Users/example/projects/example-repo`                                |
 | relative-to     | —        | `--relative-to <PATH>`   | e.g. `--relative-to ~/projects` → `example-repo`                      |
+| vcs             | VCS      | `--vcs`                  | VCS remote URL permalink — see [VCS URL anchor](#vcs-url-anchor)      |
 
 Notes:
 
@@ -104,6 +105,91 @@ Notes:
   ancestor `.git` is found.
 - **`home` falls back to absolute** when the target is outside `$HOME`,
   rather than producing a confusing `~/../...` form.
+
+## VCS URL anchor
+
+`--vcs` renders each path as a **VCS remote URL** instead of a local
+path string. This is useful for sharing stable permalinks to files in
+pull requests, issues, or documentation.
+
+By default the feature is **fully offline** — it parses `.git/config`,
+`.git/HEAD`, and ref files directly to resolve the remote URL, current
+commit SHA, and branch. No `git` subprocess is invoked unless you
+explicitly request `--vcs-verify`.
+
+### Flags
+
+| Flag                          | Default  | Description                                                        |
+| ----------------------------- | -------- | ------------------------------------------------------------------ |
+| `--vcs` (alias `--VCS`)       | —        | Enable VCS URL mode (mutually exclusive with other anchor modes)   |
+| `--vcs-remote <REMOTE>`       | `origin` | Which git remote to use                                            |
+| `--vcs-default-branch <BRANCH>` | `main` | Branch to use when falling back                                    |
+| `--vcs-branch-fallback`       | off      | Use a branch name instead of a SHA when no commit is resolvable    |
+| `--vcs-verify`                | off      | Opt-in check that the ref exists on the remote via `git ls-remote` |
+
+### Commit SHA vs branch
+
+`--vcs` prefers the **commit SHA** to produce a stable permalink. If no
+SHA is resolvable (e.g. a freshly initialized repo with no commits) and
+`--vcs-branch-fallback` is **not** set, the command errors with exit
+code 12 and a message suggesting `--vcs-branch-fallback`.
+
+### Host-aware URL formats
+
+Remote URLs are normalized from SSH, `ssh://`, or HTTPS forms and
+rendered with the appropriate URL structure for each host:
+
+| Host            | URL format                                              |
+| --------------- | ------------------------------------------------------- |
+| github.com      | `https://github.com/{owner}/{repo}/blob/{ref}/{path}`   |
+| gitlab.com      | `https://gitlab.com/{owner}/{repo}/-/blob/{ref}/{path}` |
+| bitbucket.org   | `https://bitbucket.org/{owner}/{repo}/src/{ref}/{path}` |
+| other (generic) | `https://{host}/{owner}/{repo}/blob/{ref}/{path}`       |
+
+Nested GitLab groups (e.g. `org/group/subgroup/repo`) are handled
+correctly — the owner portion preserves the full group path.
+
+### Offline safety warnings
+
+When local state looks risky — detached HEAD, no upstream configured, or
+local commits not pushed — a warning is printed to **stderr**:
+
+```
+yank-path: warning: commit abc1234 may not exist on remote 'origin' (no upstream, local-only commits)
+```
+
+The URL is still produced on **stdout** and the exit code remains 0.
+This lets you pipe stdout cleanly while seeing warnings in the terminal.
+
+### Remote verification (`--vcs-verify`)
+
+`--vcs-verify` spawns a `git ls-remote` subprocess (with a timeout
+guard) to confirm the ref exists on the remote:
+- **Ref found:** no extra output.
+- **Ref not found:** warning printed to stderr.
+- **Verification failed** (git missing, unreachable, timeout): neutral
+  note printed to stderr.
+
+In all cases the URL is still produced and exit code is unchanged (0).
+`--vcs-verify` requires `git` on PATH; without it you receive a neutral
+note.
+
+### Examples
+
+```sh
+# GitHub permalink to a file at the current commit
+yank-path --vcs --print --no-copy src/main.rs
+# -> https://github.com/owner/repo/blob/abc1234.../src/main.rs
+
+# Use a branch instead of a SHA when no commit is resolvable
+yank-path --vcs --vcs-branch-fallback --print --no-copy src/main.rs
+
+# Point at a non-default remote
+yank-path --vcs --vcs-remote upstream --print --no-copy README.md
+
+# Opt-in: verify the ref exists on the remote (requires git on PATH)
+yank-path --vcs --vcs-verify --print --no-copy src/main.rs
+```
 
 ## Glob expansion
 

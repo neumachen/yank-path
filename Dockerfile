@@ -50,9 +50,15 @@ RUN cargo build --release \
 # CLI will gracefully fall back to writing the rendered path(s) to stdout.
 FROM debian:bookworm-slim AS runtime
 
-# ca-certificates is the only typical runtime need; keep the image minimal.
+# ca-certificates: HTTPS trust roots.
+# git + openssh-client: only needed for the opt-in `--vcs-verify` flag, which
+# runs `git ls-remote` over HTTPS/SSH. All other `--vcs` URL rendering is
+# fully offline and needs neither. Kept minimal via --no-install-recommends.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates \
+    && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        git \
+        openssh-client \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /build/target/release/yank-path /usr/local/bin/yank-path
