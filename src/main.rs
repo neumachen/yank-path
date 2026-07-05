@@ -18,6 +18,13 @@ use yank_path::{
 fn main() -> ExitCode {
     let cli = Cli::parse();
 
+    // Standalone action: emit a shell completion script and exit. Must run
+    // before any filesystem/clipboard wiring since completions need none of it.
+    if let Some(shell) = cli.completions {
+        Cli::write_completions(shell, &mut std::io::stdout());
+        return ExitCode::SUCCESS;
+    }
+
     let fs = OsFileSystem::new();
     let git_detector = WalkUpGitRootDetector::new();
     let vcs_provider = GitDirVcsInfoProvider::new();
