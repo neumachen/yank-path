@@ -21,15 +21,16 @@ RUN apt-get update \
 WORKDIR /build
 
 # ---- Dependency caching layer --------------------------------------------
-# Copy only the manifests, synthesize a dummy binary + library so cargo can
-# resolve and compile every third-party dependency. This layer is reused as
+# Copy only the manifests, synthesize a dummy binary + library + bench so cargo
+# can resolve and compile every third-party dependency. This layer is reused as
 # long as Cargo.toml / Cargo.lock are unchanged.
 COPY Cargo.toml Cargo.lock ./
-RUN mkdir -p src \
+RUN mkdir -p src benches \
     && echo 'fn main() {}' > src/main.rs \
     && echo '// dummy' > src/lib.rs \
+    && echo 'fn main() {}' > benches/parsers.rs \
     && cargo build --release \
-    && rm -rf src \
+    && rm -rf src benches \
         target/release/yank-path* \
         target/release/libyank_path* \
         target/release/deps/yank_path* \
@@ -38,6 +39,7 @@ RUN mkdir -p src \
 
 # ---- Real build ----------------------------------------------------------
 COPY src ./src
+COPY benches ./benches
 RUN cargo build --release \
     && strip target/release/yank-path || true
 
@@ -45,10 +47,11 @@ RUN cargo build --release \
 # Stage 2: runtime
 # -----------------------------------------------------------------------------
 # Slim Debian base for glibc compatibility with the dynamically linked
-# release binary. Note: the `arboard` clipboard backend requires a display
-# server (X11/Wayland) which is unavailable inside this container, so the
-# CLI will gracefully fall back to writing the rendered path(s) to stdout.
-FROM debian:bookworm-slim AS runtime
+# release binary. Must match the builder's Debian version (rust:1.90-slim uses
+# trixie with glibc 2.39). Note: the `arboard` clipboard backend requires a
+# display server (X11/Wayland) which is unavailable inside this container, so
+# the CLI will gracefully fall back to writing the rendered path(s) to stdout.
+FROM debian:trixie-slim AS runtime
 
 # ca-certificates: HTTPS trust roots.
 # git + openssh-client: only needed for the opt-in `--vcs-verify` flag, which
