@@ -415,6 +415,7 @@ mod tests {
             vcs_default_branch: None,
             vcs_branch_fallback: false,
             vcs_verify: false,
+            completions: None,
         }
     }
 
@@ -674,6 +675,7 @@ mod tests {
             vcs_default_branch: None,
             vcs_branch_fallback: false,
             vcs_verify: false,
+            completions: None,
         };
         let err = App::new(&fs, &git, &NoVcs, &NoVerify, &mut clip, &mut sink)
             .run(&cli)

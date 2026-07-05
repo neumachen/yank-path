@@ -7,7 +7,8 @@
 
 use std::path::PathBuf;
 
-use clap::{ArgGroup, Parser, ValueEnum};
+use clap::{ArgGroup, CommandFactory, Parser, ValueEnum};
+use clap_complete::Shell;
 
 use crate::anchor::Anchor;
 use crate::error::YankError;
@@ -81,6 +82,20 @@ pub struct Cli {
     /// still produced. Only adds a warning when the ref is definitively absent.
     #[arg(long = "vcs-verify", requires = "vcs")]
     pub vcs_verify: bool,
+
+    /// Generate a shell completion script for the given shell and exit.
+    ///
+    /// Supported shells: `bash`, `zsh`, `fish`, `elvish`, `powershell`.
+    /// This is a standalone action — it ignores all other arguments and
+    /// writes the completion script to stdout without touching the
+    /// filesystem or clipboard.
+    #[arg(
+        long = "completions",
+        value_name = "SHELL",
+        value_enum,
+        exclusive = true
+    )]
+    pub completions: Option<Shell>,
 }
 
 /// `--from` enum, with the documented aliases.
@@ -110,6 +125,17 @@ impl From<FromAnchor> for Anchor {
 }
 
 impl Cli {
+    /// Write a shell completion script for `shell` to `writer`.
+    ///
+    /// Uses the derived clap [`Command`] so the completions always reflect
+    /// the current flag set (including all `--vcs*` options). The binary
+    /// name emitted in the script is `yank-path`.
+    pub fn write_completions<W: std::io::Write>(shell: Shell, writer: &mut W) {
+        let mut cmd = Cli::command();
+        let bin_name = cmd.get_name().to_string();
+        clap_complete::generate(shell, &mut cmd, bin_name, writer);
+    }
+
     /// Resolve the user's anchor choice.
     ///
     /// * Returns [`Anchor::Home`] when no anchor option was supplied.
@@ -269,6 +295,7 @@ mod tests {
             vcs_default_branch: None,
             vcs_branch_fallback: false,
             vcs_verify: false,
+            completions: None,
         };
         match cli.anchor() {
             Err(YankError::ConflictingAnchors) => {}
@@ -291,6 +318,7 @@ mod tests {
             vcs_default_branch: None,
             vcs_branch_fallback: false,
             vcs_verify: false,
+            completions: None,
         };
         match cli.anchor() {
             Err(YankError::ConflictingAnchors) => {}
@@ -372,5 +400,47 @@ mod tests {
         let cli = parse(&["--vcs", "--vcs-verify"]);
         assert!(cli.vcs);
         assert!(cli.vcs_verify);
+    }
+
+    // --- Shell completion tests ---
+
+    #[test]
+    fn generates_bash_completions_containing_bin_name() {
+        let mut buf = Vec::new();
+        Cli::write_completions(Shell::Bash, &mut buf);
+        let output = String::from_utf8(buf).expect("completions should be valid UTF-8");
+        assert!(!output.is_empty(), "bash completions should not be empty");
+        assert!(
+            output.contains("yank-path"),
+            "bash completions should contain binary name"
+        );
+    }
+
+    #[test]
+    fn generates_zsh_completions_with_compdef_marker() {
+        let mut buf = Vec::new();
+        Cli::write_completions(Shell::Zsh, &mut buf);
+        let output = String::from_utf8(buf).expect("completions should be valid UTF-8");
+        assert!(
+            output.contains("#compdef yank-path"),
+            "zsh completions should contain #compdef yank-path marker"
+        );
+    }
+
+    #[test]
+    fn completions_flag_parses() {
+        let cli = Cli::try_parse_from(["yank-path", "--completions", "zsh"])
+            .expect("--completions zsh should parse");
+        assert_eq!(cli.completions, Some(Shell::Zsh));
+    }
+
+    #[test]
+    fn completions_is_exclusive() {
+        let err = Cli::try_parse_from(["yank-path", "--completions", "bash", "--vcs"]).unwrap_err();
+        assert_eq!(
+            err.kind(),
+            clap::error::ErrorKind::ArgumentConflict,
+            "expected ArgumentConflict, got: {err}"
+        );
     }
 }

@@ -147,6 +147,42 @@ validation path described below, not the `--glob` machinery.
   of failing. Combining the fallback with `--print` does not
   double-emit.
 
+## Shell completions
+
+`yank-path --completions <SHELL>` prints a completion script to stdout
+for the given shell; redirect it to the appropriate location for your
+shell. This is a standalone action — it ignores all other arguments,
+does not touch the clipboard or filesystem, and exits 0.
+
+Supported shells: `bash`, `zsh`, `fish`, `elvish`, `powershell`.
+
+### Bash (user-local)
+
+```sh
+mkdir -p ~/.local/share/bash-completion/completions
+yank-path --completions bash > ~/.local/share/bash-completion/completions/yank-path
+```
+
+### Zsh
+
+```sh
+mkdir -p ~/.zsh/completions
+yank-path --completions zsh > ~/.zsh/completions/_yank-path
+# ensure ~/.zshrc has (before `compinit`):
+#   fpath=(~/.zsh/completions $fpath)
+```
+
+### Fish
+
+```sh
+mkdir -p ~/.config/fish/completions
+yank-path --completions fish > ~/.config/fish/completions/yank-path.fish
+```
+
+Elvish and PowerShell are also supported — use `--completions elvish`
+or `--completions powershell` and redirect to the appropriate location
+for those shells.
+
 ## Strict validation
 
 Validation is **all-or-nothing**. Every positional operand must exist
@@ -233,7 +269,6 @@ clear that the current surface is minimal by design.
   not silently treated as a wildcard.
 - NUL-separated I/O (`-0` style separators).
 - Configuration files or environment-variable defaults.
-- Shell completions.
 - Man pages.
 - OS-level packaging (Homebrew, deb/rpm, etc.).
 
