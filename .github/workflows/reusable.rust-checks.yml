@@ -3,8 +3,7 @@
 name: Rust Checks
 
 on:
-  # No inputs needed; the checks are deterministic from the repo state.
-  workflow_call: {}
+  workflow_call:
 
 env:
   CARGO_TERM_COLOR: always

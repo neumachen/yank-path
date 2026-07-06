@@ -11,6 +11,14 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Grant the token what the reusable workflows' jobs declare. The docker
+# reusable's job requests packages: write; a reusable cannot elevate beyond
+# the caller, and this repo's default token is read-only, so we must grant it
+# here. (CI builds with push_image:false, so nothing is actually pushed.)
+permissions:
+  contents: read
+  packages: write
+
 jobs:
   # Full Rust quality gate: fmt, clippy, test, build, MSRV
   checks:
