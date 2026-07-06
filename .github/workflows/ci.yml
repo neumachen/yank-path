@@ -1,4 +1,5 @@
 # CI pipeline: runs on every push to main and every PR
+# Composes reusable workflows for Rust checks and Docker build (no push)
 name: CI
 
 on:
@@ -10,8 +11,23 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Grant the token what the reusable workflows' jobs declare. The docker
+# reusable's job requests packages: write; a reusable cannot elevate beyond
+# the caller, and this repo's default token is read-only, so we must grant it
+# here. (CI builds with push_image:false, so nothing is actually pushed.)
+permissions:
+  contents: read
+  packages: write
+
 jobs:
   # Full Rust quality gate: fmt, clippy, test, build, MSRV
   checks:
     name: Rust Checks
     uses: ./.github/workflows/reusable.rust-checks.yml
+
+  # Build and smoke-test Docker image (no push to registry)
+  docker:
+    name: Docker
+    uses: ./.github/workflows/reusable.docker.yml
+    with:
+      push_image: false
