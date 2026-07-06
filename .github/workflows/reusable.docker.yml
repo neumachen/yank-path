@@ -1,0 +1,80 @@
+# Reusable workflow: Docker build, smoke-test, and optional push to GHCR
+# Called by ci.yml (push_image: false) and cd.yml (push_image: true)
+name: Docker
+
+on:
+  workflow_call:
+    inputs:
+      push_image:
+        description: Whether to push the image to GHCR
+        required: true
+        type: boolean
+      image_ref:
+        description: Version/tag to apply (e.g. release tag like v1.2.3). Used when push_image is true.
+        required: false
+        type: string
+        default: ""
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: neumachen/yank-path
+
+jobs:
+  docker:
+    name: Build Docker image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Derive tags and labels. For CI (no push), use a local 'ci' tag.
+      # For CD (push), use the semver tag (strip leading 'v') + 'latest'.
+      - name: Extract metadata for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            # CI mode: just a local tag for smoke-testing
+            type=raw,value=ci,enable=${{ !inputs.push_image }}
+            # CD mode: semver from the release tag (strip 'v' prefix)
+            type=semver,pattern={{version}},value=${{ inputs.image_ref }},enable=${{ inputs.push_image && inputs.image_ref != '' }}
+            # CD mode: also tag as 'latest' for non-prerelease
+            type=raw,value=latest,enable=${{ inputs.push_image && inputs.image_ref != '' && !contains(inputs.image_ref, '-') }}
+
+      # Only log in to GHCR when pushing
+      - name: Log in to GHCR
+        if: inputs.push_image
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: ${{ inputs.push_image }}
+          load: ${{ !inputs.push_image }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Smoke-test only in CI mode (when image is loaded locally, not pushed)
+      - name: Smoke-test image
+        if: ${{ !inputs.push_image }}
+        run: |
+          # Use the local 'ci' tag for smoke tests
+          IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:ci"
+          echo "Testing image: ${IMAGE}"
+          docker run --rm "${IMAGE}" --help
+          docker run --rm "${IMAGE}" --print --no-copy --absolute /etc/hostname
+          docker run --rm --entrypoint git "${IMAGE}" --version
