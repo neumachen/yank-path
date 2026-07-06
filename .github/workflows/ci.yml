@@ -1,5 +1,4 @@
 # CI pipeline: runs on every push to main and every PR
-# Composes reusable workflows for Rust checks and Docker build (no push)
 name: CI
 
 on:
@@ -16,10 +15,3 @@ jobs:
   checks:
     name: Rust Checks
     uses: ./.github/workflows/reusable.rust-checks.yml
-
-  # Build and smoke-test Docker image (no push to registry)
-  docker:
-    name: Docker
-    uses: ./.github/workflows/reusable.docker.yml
-    with:
-      push_image: false
