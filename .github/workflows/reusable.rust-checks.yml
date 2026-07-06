@@ -1,0 +1,63 @@
+# Reusable workflow: Rust quality gate (fmt, clippy, test, build, MSRV)
+# Called by ci.yml and cd.yml via `uses: ./.github/workflows/reusable.rust-checks.yml`
+name: Rust Checks
+
+on:
+  workflow_call:
+    # No inputs needed; the checks are deterministic from the repo state
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # Cross-platform test matrix: stable Rust on Linux and macOS.
+  # Windows is not yet covered because path-rendering tests assume POSIX
+  # separators (tracked as future work to make tests separator-agnostic).
+  test:
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        rust: [stable]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Check formatting
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Test
+        run: cargo test --all --all-features
+
+      - name: Build release
+        run: cargo build --release --locked
+
+  # MSRV check: guards rust-version = "1.88" in Cargo.toml
+  msrv:
+    name: MSRV (1.88)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain (MSRV)
+        uses: dtolnay/rust-toolchain@1.88
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build (MSRV check)
+        run: cargo build --all-features --locked
