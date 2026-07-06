@@ -48,16 +48,16 @@ jobs:
       - name: Build release
         run: cargo build --release --locked
 
-  # MSRV check: guards rust-version = "1.85" in Cargo.toml
+  # MSRV check: guards rust-version = "1.88" in Cargo.toml
   msrv:
-    name: MSRV (1.85)
+    name: MSRV (1.88)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Install Rust toolchain (MSRV)
-        uses: dtolnay/rust-toolchain@1.85
+        uses: dtolnay/rust-toolchain@1.88
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2

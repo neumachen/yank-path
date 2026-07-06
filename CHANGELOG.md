@@ -35,7 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- MSRV set to Rust 1.85 (required by clap/clap_complete 4.6.x and Cargo.lock v4).
+- MSRV set to Rust 1.88 (required by the transitive `image` crate via `arboard`; clap/clap_complete need 1.85 and Cargo.lock is v4).
 - CI matrix covers Linux and macOS with MSRV verification (Windows is future work).
 - Security CI jobs: `cargo audit` and `cargo deny`.
 - Prebuilt release binaries via GitHub Actions.
@@ -49,7 +49,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `ConflictingAnchors` error message now includes `--vcs` in the conflict list.
 - Docker image build: added stub bench file in dependency-cache layer so `[[bench]]`
   target compiles; real `benches/` copied before final build.
-- Corrected declared MSRV to 1.85 to match actual dependency floor.
+- Corrected declared MSRV to 1.88 to match actual dependency floor (`image@0.25.10` via `arboard`).
 - Docker runtime base aligned to `debian:trixie-slim` to match builder's glibc.
 
 [Unreleased]: https://github.com/neumachen/yank-path/compare/main...HEAD
