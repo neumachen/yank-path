@@ -1,5 +1,5 @@
 [tools]
-rust = "stable"
+rust = "1.95.0"
 
 # Native linker (faster dev builds; referenced by RUSTFLAGS below)
 mold = "latest"
