@@ -702,4 +702,161 @@ mod tests {
         // Sanity: anchor was resolved to Absolute, not Home.
         assert_eq!(cli.anchor().unwrap(), Anchor::Absolute);
     }
+
+    // -----------------------------------------------------------------------
+    // VCS-specific test fakes and unit tests
+    // -----------------------------------------------------------------------
+
+    /// A `GitRootDetector` that returns a fixed path.
+    struct FixedGit(PathBuf);
+    impl GitRootDetector for FixedGit {
+        fn find_root(&self, _start: &Path) -> Option<PathBuf> {
+            Some(self.0.clone())
+        }
+    }
+
+    /// A `VcsInfoProvider` that returns preset `VcsInfo`.
+    struct FakeVcs(crate::vcs::VcsInfo);
+    impl VcsInfoProvider for FakeVcs {
+        fn info(&self, _git_root: &Path, _remote: &str) -> Result<crate::vcs::VcsInfo, YankError> {
+            Ok(self.0.clone())
+        }
+    }
+
+    /// A `RemoteVerifier` that returns a preset outcome.
+    ///
+    /// We store the discriminant and any reason string, then reconstruct
+    /// the outcome on each call (VerifyOutcome derives Clone so we can
+    /// just clone the stored value).
+    struct FakeVerify(VerifyOutcome);
+    impl RemoteVerifier for FakeVerify {
+        fn verify(&self, _git_root: &Path, _remote: &str, _git_ref: &str) -> VerifyOutcome {
+            self.0.clone()
+        }
+    }
+
+    /// Stable 40-hex SHA for unit tests.
+    const TEST_SHA: &str = "abc1234567890123456789012345678901234567";
+
+    /// Build a default GitHub VcsInfo with the test SHA and branch "main",
+    /// configured with upstream and not ahead — no offline warning emitted.
+    fn github_vcs_info() -> crate::vcs::VcsInfo {
+        crate::vcs::VcsInfo {
+            remote_url: "git@github.com:user/repo.git".to_string(),
+            sha: Some(TEST_SHA.to_string()),
+            branch: Some("main".to_string()),
+            detached: false,
+            has_upstream: true,
+            ahead_of_remote: false,
+        }
+    }
+
+    #[test]
+    fn vcs_multiple_operands_share_sha_and_newline_join() {
+        let fs = MemFs::new("/home/u/repo")
+            .with_file(PathBuf::from("/home/u/repo/a.txt"))
+            .with_file(PathBuf::from("/home/u/repo/b.txt"));
+        let git = FixedGit(PathBuf::from("/home/u/repo"));
+        let vcs = FakeVcs(github_vcs_info());
+        let mut clip = FakeClipboard::new_available();
+        let mut sink = BufferSink::new();
+
+        let mut cli = cli_with(vec![
+            PathBuf::from("/home/u/repo/a.txt"),
+            PathBuf::from("/home/u/repo/b.txt"),
+        ]);
+        cli.vcs = true;
+        cli.print = true;
+        cli.no_copy = true;
+
+        let code = App::new(&fs, &git, &vcs, &NoVerify, &mut clip, &mut sink)
+            .run(&cli)
+            .unwrap();
+
+        assert_eq!(code, 0);
+
+        // Both URLs should share the same SHA and be newline-joined
+        let expected = format!(
+            "https://github.com/user/repo/blob/{TEST_SHA}/a.txt
+\
+             https://github.com/user/repo/blob/{TEST_SHA}/b.txt"
+        );
+        assert_eq!(sink.joined(), expected);
+    }
+
+    #[test]
+    fn vcs_verify_absent_emits_single_warning_for_multiple_files() {
+        // This test verifies the "commit/file not on remote" scenario.
+        // When `--vcs-verify` is enabled and verification returns `Absent`,
+        // `render_vcs` should emit exactly ONE warning for the entire run,
+        // not one per file.
+        //
+        // Since stderr lines from `render_vcs` are `eprintln!`d in `run` and
+        // not captured in the test harness, we call `render_vcs` directly to
+        // inspect the returned `(rendered, stderr_lines)` tuple.
+
+        let fs = MemFs::new("/home/u/repo")
+            .with_file(PathBuf::from("/home/u/repo/a.txt"))
+            .with_file(PathBuf::from("/home/u/repo/b.txt"));
+        let git = FixedGit(PathBuf::from("/home/u/repo"));
+        let vcs = FakeVcs(github_vcs_info());
+        let verifier = FakeVerify(VerifyOutcome::Absent);
+        let mut clip = FakeClipboard::new_available();
+        let mut sink = BufferSink::new();
+
+        let app = App::new(&fs, &git, &vcs, &verifier, &mut clip, &mut sink);
+
+        // Build the RenderContext manually
+        let cwd = PathBuf::from("/home/u/repo");
+        let git_root = PathBuf::from("/home/u/repo");
+        let ctx = RenderContext {
+            cwd,
+            home: None,
+            git_root: Some(git_root.clone()),
+            fs: &fs,
+        };
+
+        // Resolved paths (simulating what resolve_operands returns)
+        let resolved = vec![
+            PathBuf::from("/home/u/repo/a.txt"),
+            PathBuf::from("/home/u/repo/b.txt"),
+        ];
+
+        // Build a CLI with vcs and vcs_verify enabled
+        let mut cli = cli_with(vec![]);
+        cli.vcs = true;
+        cli.vcs_verify = true;
+
+        // Call render_vcs directly
+        let (rendered, stderr_lines) = app
+            .render_vcs(&resolved, &ctx, &cli, Some(&git_root))
+            .unwrap();
+
+        // Both files should be rendered
+        assert_eq!(rendered.len(), 2);
+        assert!(rendered[0].contains(TEST_SHA));
+        assert!(rendered[1].contains(TEST_SHA));
+        assert!(rendered[0].contains("/a.txt"));
+        assert!(rendered[1].contains("/b.txt"));
+
+        // The crucial assertion: exactly ONE warning about "not found on remote"
+        // for the entire run (repo-level verification), NOT one per file.
+        let absent_warnings: Vec<_> = stderr_lines
+            .iter()
+            .filter(|l| l.contains("not found on remote"))
+            .collect();
+        assert_eq!(
+            absent_warnings.len(),
+            1,
+            "expected exactly 1 'not found on remote' warning for the whole run, got {}",
+            absent_warnings.len()
+        );
+
+        // The warning should mention the truncated SHA (first 7 chars)
+        assert!(
+            absent_warnings[0].contains(&TEST_SHA[..7]),
+            "warning should contain truncated SHA: {}",
+            absent_warnings[0]
+        );
+    }
 }
