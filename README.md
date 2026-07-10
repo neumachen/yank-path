@@ -1,7 +1,6 @@
 # yank-path
 
 [![CI](https://github.com/neumachen/yank-path/actions/workflows/ci.yml/badge.svg)](https://github.com/neumachen/yank-path/actions/workflows/ci.yml)
-[![Docker](https://github.com/neumachen/yank-path/actions/workflows/docker.yml/badge.svg)](https://github.com/neumachen/yank-path/actions/workflows/docker.yml)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
 [![Crates.io](https://img.shields.io/crates/v/yank-path.svg)](https://crates.io/crates/yank-path)
 [![Changelog](https://img.shields.io/badge/changelog-Keep%20a%20Changelog-orange.svg)](CHANGELOG.md)
