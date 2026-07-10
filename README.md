@@ -24,57 +24,111 @@ yank-path [OPTIONS] [PATH...]
 - Multiple operands are rendered **one per line**, in the order given.
 - All options apply to **every** operand in the invocation.
 
-## Installation
+## Examples
 
-### From crates.io (recommended)
+All examples assume the current working directory is
+`~/projects/example-repo` (i.e. `/Users/example/projects/example-repo`).
 
-```sh
-cargo install yank-path
+> **Note:** By default `yank-path` copies the rendered text to the system
+> clipboard and writes nothing to stdout. The sessions below add
+> `--print --no-copy` so the rendered result is visible in the terminal;
+> in normal use you would omit those flags and just let it copy.
+
+### Copy the current directory's path
+
+```console
+~/projects/example-repo $ yank-path --print --no-copy
+~/projects/example-repo
 ```
 
-### From source (latest `main`)
+### Copy a path in a different form
 
-Install the latest unreleased revision directly from GitHub:
+Pick the anchor that matches how you want the path to read. `--from`,
+`--absolute`, and `--relative-to` are mutually exclusive — see
+[Anchor modes](#anchor-modes) for the full reference.
 
-```sh
-cargo install --git https://github.com/neumachen/yank-path
+```console
+~/projects/example-repo $ yank-path --from home --print --no-copy .
+~/projects/example-repo
+
+~/projects/example-repo $ yank-path --from base --print --no-copy .
+example-repo
+
+~/projects/example-repo $ yank-path --from parent --print --no-copy .
+projects/example-repo
+
+~/projects/example-repo $ yank-path --from git --print --no-copy .
+.
+
+~/projects/example-repo $ yank-path --absolute --print --no-copy .
+/Users/example/projects/example-repo
+
+~/projects/example-repo $ yank-path --relative-to ~/projects --print --no-copy .
+example-repo
 ```
 
-Or clone and build manually:
+### Copy the path of a specific file
 
-```sh
-git clone https://github.com/neumachen/yank-path
-cd yank-path
-cargo build --release
-# binary at target/release/yank-path
+```console
+# Repo-relative path for a source file (errors if not in a Git repo).
+~/projects/example-repo $ yank-path --from git --print --no-copy src/main.rs
+src/main.rs
+
+# Canonical absolute path of a file.
+~/projects/example-repo $ yank-path --absolute --print --no-copy README.md
+/Users/example/projects/example-repo/README.md
+
+# Render a path relative to an explicit base directory.
+~/projects/example-repo $ yank-path --relative-to ~ --print --no-copy ~/projects/example-repo/README.md
+projects/example-repo/README.md
 ```
 
-### Runtime notes
+### Share a link to a file (VCS permalink)
 
-The binary is self-contained — once built, it has no runtime
-dependencies beyond a system clipboard backend, and even that is
-optional. On **headless systems** with no X11 or Wayland display (CI
-runners, SSH sessions, the Docker image shipped with this repo)
-`yank-path` automatically falls back to printing the rendered text to
-stdout instead of copying it to the clipboard, so the command remains
-useful everywhere.
+Turn a file path into a stable remote URL for pull requests, issues, or
+docs. See [VCS URL anchor](#vcs-url-anchor) for all `--vcs*` options.
 
-If you would rather not install a toolchain locally, the provided
-Docker image works as a drop-in alternative — see
-[Container usage](#container-usage) for the full workflow:
+```console
+# GitHub permalink to a file at the current commit
+~/projects/example-repo $ yank-path --vcs --print --no-copy src/main.rs
+https://github.com/owner/repo/blob/abc1234.../src/main.rs
 
-```sh
-docker build -t yank-path .
-docker run --rm yank-path .
+# Use a branch instead of a SHA when no commit is resolvable
+~/projects/example-repo $ yank-path --vcs --vcs-branch-fallback --print --no-copy src/main.rs
+# -> https://github.com/owner/repo/blob/main/src/main.rs
+
+# Point at a non-default remote
+~/projects/example-repo $ yank-path --vcs --vcs-remote upstream --print --no-copy README.md
+# -> https://github.com/upstream-owner/repo/blob/abc1234.../README.md
 ```
 
-### Requirements
+### Copy several files at once (glob)
 
-Building or installing from source requires a stable Rust toolchain.
-The minimum supported Rust version (MSRV) is **1.88**, which CI
-enforces. Linux and macOS are tested in CI; Windows is currently
-untested (path rendering assumes POSIX separators — Windows support is
-future work).
+`--glob` matches files in the current directory only. See
+[Glob expansion](#glob-expansion) for the full rules.
+
+```console
+~/projects/example-repo $ ls *.rs
+build.rs
+
+~/projects/example-repo $ yank-path --glob '*.rs' --print --no-copy
+~/projects/example-repo/build.rs
+```
+
+### Use it in a script (print, don't copy)
+
+```console
+# Print to stdout AND copy to the clipboard.
+~/projects/example-repo $ yank-path --print
+~/projects/example-repo
+
+# Pure stdout renderer — never touches the clipboard.
+~/projects/example-repo $ yank-path --print --no-copy
+~/projects/example-repo
+
+# Validate operands only (silent success, no output, no clipboard write).
+~/projects/example-repo $ yank-path --no-copy README.md
+```
 
 ## Anchor modes
 
@@ -175,29 +229,12 @@ In all cases the URL is still produced and exit code is unchanged (0).
 `--vcs-verify` requires `git` on PATH; without it you receive a neutral
 note.
 
-### Examples
-
-```sh
-# GitHub permalink to a file at the current commit
-yank-path --vcs --print --no-copy src/main.rs
-# -> https://github.com/owner/repo/blob/abc1234.../src/main.rs
-
-# Use a branch instead of a SHA when no commit is resolvable
-yank-path --vcs --vcs-branch-fallback --print --no-copy src/main.rs
-
-# Point at a non-default remote
-yank-path --vcs --vcs-remote upstream --print --no-copy README.md
-
-# Opt-in: verify the ref exists on the remote (requires git on PATH)
-yank-path --vcs --vcs-verify --print --no-copy src/main.rs
-```
-
 ## Glob expansion
 
 `--glob PATTERN` expands a single-level glob in the current working
 directory. The flag is **repeatable** and the results are concatenated.
 
-Rules:
+### Rules
 
 - **Single-level only.** A pattern may not contain `/`; multi-segment
   patterns are rejected.
@@ -283,26 +320,6 @@ This means a successful `yank-path` invocation always corresponds to a
 clipboard that contains the full, valid result — there is no partial
 state to reason about.
 
-## Examples
-
-```sh
-# Default: yank `~/projects/example-repo` (home-anchored) for the cwd.
-yank-path
-
-# Repo-relative path for a source file (errors if not in a Git repo).
-yank-path --from git src/main.rs
-
-# Canonical absolute path of a file.
-yank-path --absolute README.md
-
-# Print all *.rs files in the cwd to stdout without touching the clipboard.
-yank-path --glob '*.rs' --print --no-copy
-
-# Render a path relative to an explicit base directory.
-yank-path --relative-to ~ ~/projects/example-repo/README.md
-# → projects/example-repo/README.md
-```
-
 ## Container usage
 
 `yank-path` ships with a multi-stage `Dockerfile`, a `docker-compose.yml`
@@ -365,6 +382,58 @@ clear that the current surface is minimal by design.
 - Configuration files or environment-variable defaults.
 - Man pages.
 - OS-level packaging (Homebrew, deb/rpm, etc.).
+
+## Installation
+
+### From crates.io (recommended)
+
+```sh
+cargo install --locked yank-path
+```
+
+### From source (latest `main`)
+
+Install the latest unreleased revision directly from GitHub:
+
+```sh
+cargo install --locked --git https://github.com/neumachen/yank-path
+```
+
+Or clone and build manually:
+
+```sh
+git clone https://github.com/neumachen/yank-path
+cd yank-path
+cargo build --release
+# binary at target/release/yank-path
+```
+
+### Runtime notes
+
+The binary is self-contained — once built, it has no runtime
+dependencies beyond a system clipboard backend, and even that is
+optional. On **headless systems** with no X11 or Wayland display (CI
+runners, SSH sessions, the Docker image shipped with this repo)
+`yank-path` automatically falls back to printing the rendered text to
+stdout instead of copying it to the clipboard, so the command remains
+useful everywhere.
+
+If you would rather not install a toolchain locally, the provided
+Docker image works as a drop-in alternative — see
+[Container usage](#container-usage) for the full workflow:
+
+```sh
+docker build -t yank-path .
+docker run --rm yank-path .
+```
+
+### Requirements
+
+Building or installing from source requires a stable Rust toolchain.
+The minimum supported Rust version (MSRV) is **1.88**, which CI
+enforces. Linux and macOS are tested in CI; Windows is currently
+untested (path rendering assumes POSIX separators — Windows support is
+future work).
 
 ## License
 
