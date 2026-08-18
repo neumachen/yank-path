@@ -35,44 +35,54 @@ pub struct Cli {
 
     /// Anchor selection: `home`, `base`, `parent`, or `git`. Aliases:
     /// `basename` → `base`, `dirname` → `parent`.
-    #[arg(long = "from", value_name = "ANCHOR", value_enum)]
+    #[arg(short = 'f', long = "from", value_name = "ANCHOR", value_enum)]
     pub from: Option<FromAnchor>,
 
     /// Render paths relative to this base directory.
-    #[arg(long = "relative-to", value_name = "PATH")]
+    #[arg(short = 'r', long = "relative-to", value_name = "PATH")]
     pub relative_to: Option<PathBuf>,
 
     /// Render paths in canonical absolute form.
-    #[arg(long = "absolute")]
+    #[arg(short = 'a', long = "absolute")]
     pub absolute: bool,
 
     /// Single-level glob pattern(s). Repeatable. Patterns containing `/`
     /// or `**` are rejected.
-    #[arg(long = "glob", value_name = "PATTERN")]
+    #[arg(short = 'g', long = "glob", value_name = "PATTERN")]
     pub glob: Vec<String>,
 
     /// Also print rendered paths to stdout (does not imply `--no-copy`).
-    #[arg(long = "print")]
+    #[arg(short = 'p', long = "print")]
     pub print: bool,
 
     /// Do not touch the system clipboard.
-    #[arg(long = "no-copy")]
+    #[arg(short = 'n', long = "no-copy")]
     pub no_copy: bool,
 
     /// Render paths as VCS remote URLs (e.g. GitHub permalink).
-    #[arg(long = "vcs", visible_alias = "VCS")]
+    #[arg(short = 'v', long = "vcs", visible_alias = "VCS")]
     pub vcs: bool,
 
     /// Remote name for `--vcs` (defaults to `origin`).
-    #[arg(long = "vcs-remote", value_name = "REMOTE", requires = "vcs")]
+    #[arg(
+        short = 'R',
+        long = "vcs-remote",
+        value_name = "REMOTE",
+        requires = "vcs"
+    )]
     pub vcs_remote: Option<String>,
 
     /// Default branch for `--vcs` (defaults to `main`).
-    #[arg(long = "vcs-default-branch", value_name = "BRANCH", requires = "vcs")]
+    #[arg(
+        short = 'd',
+        long = "vcs-default-branch",
+        value_name = "BRANCH",
+        requires = "vcs"
+    )]
     pub vcs_default_branch: Option<String>,
 
     /// Fall back to branch name when SHA is unavailable (for `--vcs`).
-    #[arg(long = "vcs-branch-fallback", requires = "vcs")]
+    #[arg(short = 'b', long = "vcs-branch-fallback", requires = "vcs")]
     pub vcs_branch_fallback: bool,
 
     /// Verify the ref exists on the remote via `git ls-remote` (for `--vcs`).
@@ -80,7 +90,7 @@ pub struct Cli {
     /// This spawns a subprocess with a timeout. If the remote is unreachable,
     /// private, or verification times out, a note is emitted but the URL is
     /// still produced. Only adds a warning when the ref is definitively absent.
-    #[arg(long = "vcs-verify", requires = "vcs")]
+    #[arg(short = 'x', long = "vcs-verify", requires = "vcs")]
     pub vcs_verify: bool,
 
     /// Generate a shell completion script for the given shell and exit.
@@ -90,6 +100,7 @@ pub struct Cli {
     /// writes the completion script to stdout without touching the
     /// filesystem or clipboard.
     #[arg(
+        short = 'c',
         long = "completions",
         value_name = "SHELL",
         value_enum,
@@ -441,6 +452,86 @@ mod tests {
             err.kind(),
             clap::error::ErrorKind::ArgumentConflict,
             "expected ArgumentConflict, got: {err}"
+        );
+    }
+
+    // --- Short flag alias tests ---
+
+    #[test]
+    fn short_from_takes_value() {
+        let cli = parse(&["-f", "git"]);
+        assert_eq!(cli.from, Some(FromAnchor::Git));
+        assert_eq!(cli.anchor().unwrap(), Anchor::Git);
+    }
+
+    #[test]
+    fn short_relative_to_takes_value() {
+        let cli = parse(&["-r", "/tmp/base"]);
+        assert_eq!(
+            cli.anchor().unwrap(),
+            Anchor::RelativeTo(PathBuf::from("/tmp/base"))
+        );
+    }
+
+    #[test]
+    fn short_absolute_boolean() {
+        let cli = parse(&["-a"]);
+        assert!(cli.absolute);
+        assert_eq!(cli.anchor().unwrap(), Anchor::Absolute);
+    }
+
+    #[test]
+    fn short_glob_is_repeatable() {
+        let cli = parse(&["-g", "*.rs", "-g", "*.md"]);
+        assert_eq!(cli.glob, vec!["*.rs".to_string(), "*.md".to_string()]);
+    }
+
+    #[test]
+    fn short_print_and_no_copy_booleans() {
+        let cli = parse(&["-p", "-n"]);
+        assert!(cli.print);
+        assert!(cli.no_copy);
+    }
+
+    #[test]
+    fn short_vcs_boolean_and_anchor() {
+        let cli = parse(&["-v"]);
+        assert!(cli.vcs);
+        assert_eq!(cli.anchor().unwrap(), Anchor::Vcs);
+    }
+
+    #[test]
+    fn short_vcs_dependent_flags_parse_with_short_vcs() {
+        let cli = parse(&["-v", "-R", "upstream", "-d", "develop", "-b", "-x"]);
+        assert!(cli.vcs);
+        assert_eq!(cli.vcs_remote.as_deref(), Some("upstream"));
+        assert_eq!(cli.vcs_default_branch.as_deref(), Some("develop"));
+        assert!(cli.vcs_branch_fallback);
+        assert!(cli.vcs_verify);
+    }
+
+    #[test]
+    fn short_completions_takes_value() {
+        let cli = Cli::try_parse_from(["yank-path", "-c", "zsh"]).expect("-c zsh should parse");
+        assert_eq!(cli.completions, Some(Shell::Zsh));
+    }
+
+    #[test]
+    fn short_anchor_flags_conflict() {
+        let err = Cli::try_parse_from(["yank-path", "-a", "-f", "home"]).unwrap_err();
+        assert_eq!(
+            err.kind(),
+            clap::error::ErrorKind::ArgumentConflict,
+            "expected ArgumentConflict, got: {err}"
+        );
+    }
+
+    #[test]
+    fn short_vcs_remote_requires_vcs() {
+        let err = Cli::try_parse_from(["yank-path", "-R", "origin"]).unwrap_err();
+        assert!(
+            matches!(err.kind(), clap::error::ErrorKind::MissingRequiredArgument),
+            "expected MissingRequiredArgument, got: {err}"
         );
     }
 }

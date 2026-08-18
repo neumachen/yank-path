@@ -150,6 +150,27 @@ and the command is `yank-path .`.
 | relative-to     | —        | `--relative-to <PATH>`   | e.g. `--relative-to ~/projects` → `example-repo`                      |
 | vcs             | VCS      | `--vcs`                  | VCS remote URL permalink — see [VCS URL anchor](#vcs-url-anchor)      |
 
+### Short flag aliases
+
+Every long-form option has a short equivalent:
+
+| Short | Long                     |
+| ----- | ------------------------ |
+| `-f`  | `--from`                 |
+| `-r`  | `--relative-to`          |
+| `-a`  | `--absolute`             |
+| `-g`  | `--glob`                 |
+| `-p`  | `--print`                |
+| `-n`  | `--no-copy`              |
+| `-v`  | `--vcs`                  |
+| `-R`  | `--vcs-remote`           |
+| `-d`  | `--vcs-default-branch`   |
+| `-b`  | `--vcs-branch-fallback`  |
+| `-x`  | `--vcs-verify`           |
+| `-c`  | `--completions`          |
+
+The existing long-form `--VCS` alias remains supported.
+
 Notes:
 
 - **No anchor ever emits a bare filename.** Every rendered output
@@ -277,6 +298,10 @@ validation path described below, not the `--glob` machinery.
 for the given shell; redirect it to the appropriate location for your
 shell. This is a standalone action — it ignores all other arguments,
 does not touch the clipboard or filesystem, and exits 0.
+
+Generated completion scripts include both the long options and their short
+aliases, so completion works for either form. If you already have a completion
+script installed, regenerate it after upgrading to pick up newly added aliases.
 
 Supported shells: `bash`, `zsh`, `fish`, `elvish`, `powershell`.
 

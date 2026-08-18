@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Short option aliases**: every CLI option now has a short equivalent (for
+  example `-f`/`--from`, `-r`/`--relative-to`, `-v`/`--vcs`,
+  `-c`/`--completions`). Generated Bash/Zsh/Fish/Elvish/PowerShell completions
+  expose both the short and long forms.
+
 ## [0.1.0] - 2026-07-06
 
 ### Added
