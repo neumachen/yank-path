@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-08-18
+
 ### Added
 
 - **Short option aliases**: every CLI option now has a short equivalent (for
@@ -61,5 +63,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Corrected declared MSRV to 1.88 to match actual dependency floor (`image@0.25.10` via `arboard`).
 - Docker runtime base aligned to `debian:trixie-slim` to match builder's glibc.
 
-[Unreleased]: https://github.com/neumachen/yank-path/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/neumachen/yank-path/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/neumachen/yank-path/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/neumachen/yank-path/compare/v0.1.0-alpha...v0.1.0
