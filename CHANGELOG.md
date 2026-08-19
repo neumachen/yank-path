@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **mise `mold` on unsupported platforms**: the mise configuration now skips the
+  Linux-only `mold` linker on macOS and Windows, preventing `mise install` from
+  failing on those platforms.
+
 ## [0.1.1] - 2026-08-18
 
 ### Added

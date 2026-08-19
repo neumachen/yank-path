@@ -1,8 +1,10 @@
 [tools]
 rust = "1.95.0"
 
-# Native linker (faster dev builds; referenced by RUSTFLAGS below)
-mold = "latest"
+# Native linker (faster dev builds; referenced by RUSTFLAGS below).
+# mold is Linux-only (aqua:rui314/mold has no macOS/Windows package), so it is
+# restricted to Linux and skipped on macOS/Windows via the `os` filter.
+mold = { version = "latest", os = ["linux"] }
 
 # Cargo extensions (installed via cargo-binstall or cargo install)
 "cargo:cargo-audit" = "latest"
