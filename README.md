@@ -357,6 +357,10 @@ targets are thin wrappers that forward to `mise run <task>`. Run
 `mise tasks` to list all available tasks, or use `mise run check` to
 run format-check, lint, and test in one command.
 
+mise installs the optional [`mold`](https://github.com/rui314/mold) linker
+only on Linux; macOS and Windows skip it and use their platform-default
+linker.
+
 ### Makefile targets
 
 | Target          | Action                                                           |
